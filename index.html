@@ -1,0 +1,2227 @@
+<!DOCTYPE html>
+<html lang="tr" class="h-full bg-slate-950 text-emerald-400 select-none">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LSPD - Mobile Data Terminal & Duty Log</title>
+    <!-- Tailwind CSS ve FontAwesome CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts: Retro/Teknolojik Yazı Tipi -->
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        mono: ['"Share Tech Mono"', 'monospace'],
+                        sans: ['"Rajdhani"', 'sans-serif'],
+                    },
+                    colors: {
+                        lspd: {
+                            blue: '#0055ff',
+                            dark: '#030712',
+                            panel: '#090d16',
+                            border: '#1e293b',
+                            neon: '#00f0ff',
+                            warning: '#ef4444'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Retro CRT Tarama Çizgileri ve Kavis Efektleri */
+        body {
+            background-color: #03050a;
+            font-family: 'Rajdhani', sans-serif;
+            text-shadow: 0 0 4px rgba(0, 240, 255, 0.3);
+        }
+        
+        .monospace-font {
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        .crt-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 3px, 3px 100%;
+            z-index: 9999;
+            pointer-events: none;
+            opacity: 0.6;
+        }
+
+        /* Yanıp sönen imleç ve uyarı efektleri */
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 0.8; box-shadow: 0 0 10px rgba(0, 240, 255, 0.2); }
+            50% { opacity: 1; box-shadow: 0 0 20px rgba(0, 240, 255, 0.6); }
+        }
+        
+        .neon-glow {
+            animation: pulse-glow 2s infinite;
+        }
+
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100%); }
+        }
+
+        .scanline-bar {
+            position: absolute;
+            width: 100%;
+            height: 4px;
+            background: rgba(0, 240, 255, 0.1);
+            animation: scanline 8s linear infinite;
+            pointer-events: none;
+        }
+
+        /* Özel Kaydırma Çubuğu */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #090d16;
+            border: 1px solid #1e293b;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1e293b;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #00f0ff;
+        }
+    </style>
+</head>
+<body class="h-full flex flex-col overflow-hidden relative">
+
+    <!-- CRT Tarama Çizgisi Efekti -->
+    <div class="crt-overlay"></div>
+    <div class="scanline-bar"></div>
+
+    <script>
+        let isMuted = false;
+        function playSound(type) {
+            if (isMuted) return;
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                
+                if (type === 'click') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(1200, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.05);
+                    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.05);
+                } else if (type === 'beep') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(800, ctx.currentTime);
+                    osc.frequency.setValueAtTime(1000, ctx.currentTime + 0.08);
+                    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.2);
+                } else if (type === 'error') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(150, ctx.currentTime);
+                    osc.frequency.linearRampToValueAtTime(100, ctx.currentTime + 0.15);
+                    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.18);
+                } else if (type === 'siren') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(600, ctx.currentTime);
+                    osc.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 0.2);
+                    osc.frequency.linearRampToValueAtTime(600, ctx.currentTime + 0.4);
+                    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.4);
+                }
+            } catch(e) { console.log("Ses çalınamadı:", e); }
+        }
+        
+        function toggleMute() {
+            isMuted = !isMuted;
+            const btn = document.getElementById('mute-btn');
+            if (isMuted) {
+                btn.innerHTML = '<i class="fa-solid fa-volume-xmark"></i>';
+                btn.classList.add('text-red-500');
+            } else {
+                btn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+                btn.classList.remove('text-red-500');
+                playSound('click');
+            }
+        }
+    </script>
+
+    <!-- ================= GİRİŞ / LOGIN EKRANI ================= -->
+    <div id="login-screen" class="flex-1 flex flex-col justify-center items-center p-4 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-900 via-[#03050a] to-[#010204]">
+        
+        <div class="w-full max-w-md bg-[#090d16] border-2 border-[#1e293b] rounded-xl p-8 relative shadow-[0_0_50px_rgba(0,85,255,0.15)] overflow-hidden">
+            <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-red-600 via-blue-600 to-indigo-600"></div>
+            <div class="flex justify-between items-center mb-6">
+                <span class="text-xs text-slate-500 monospace-font">SYS_STATUS: ENCRYPTED_V4.5</span>
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" title="Secure Core Connection Connected"></span>
+            </div>
+
+            <!-- Departman Logosu ve Başlık -->
+            <div class="text-center mb-8">
+                <div class="inline-flex items-center justify-center w-20 h-20 bg-slate-950 border border-blue-500/30 rounded-full mb-3 text-blue-500 shadow-[0_0_20px_rgba(0,85,255,0.2)]">
+                    <i class="fa-solid fa-shield-halved text-4xl"></i>
+                </div>
+                <h1 class="text-2xl font-bold tracking-wider text-white">LOS SANTOS POLICE DEPT.</h1>
+                <p class="text-xs text-blue-400 font-mono tracking-widest mt-1 uppercase">MDT & OFFICER SYSTEM</p>
+            </div>
+
+            <!-- Giriş Formu -->
+            <div id="login-form-container" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-400 mb-1 font-mono">Memur Sicili / Rozet Kodu</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500"><i class="fa-solid fa-id-badge"></i></span>
+                        <input type="text" id="login-badge" placeholder="LSPD-109 (Örn.)" class="w-full bg-slate-950 border border-slate-800 rounded px-4 py-2.5 pl-10 text-white font-mono placeholder-slate-600 focus:outline-none focus:border-blue-500 text-sm transition-all">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-400 mb-1 font-mono">Kişisel Erişim Şifresi</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500"><i class="fa-solid fa-key"></i></span>
+                        <input type="password" id="login-password" placeholder="••••" maxlength="6" class="w-full bg-slate-950 border border-slate-800 rounded px-4 py-2.5 pl-10 text-white font-mono placeholder-slate-600 focus:outline-none focus:border-blue-500 text-sm tracking-widest transition-all">
+                    </div>
+                </div>
+
+                <button onclick="attemptLogin()" class="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold py-3 px-4 rounded text-sm uppercase tracking-wider font-sans transition-all flex items-center justify-center gap-2 border border-blue-500/50 shadow-lg shadow-blue-500/20">
+                    <i class="fa-solid fa-sign-in-alt"></i> Terminale Bağlan
+                </button>
+
+                <div id="login-error-msg" class="hidden text-center text-xs text-red-500 font-mono mt-2 bg-red-950/20 py-2 border border-red-900/30 rounded">
+                    <i class="fa-solid fa-triangle-exclamation mr-1"></i> SİCİL KODU VEYA ŞİFRE GEÇERSİZ!
+                </div>
+            </div>
+
+            <!-- Yeni Memur Kayıt Ekranı Bilgilendirmesi (Giriş Ekranı Güvenliği) -->
+            <div class="mt-6 pt-4 border-t border-slate-900 text-center text-xs text-slate-500 font-mono">
+                <i class="fa-solid fa-lock mr-1"></i> Yeni kayıtlar sadece Teğmen (Lieutenant 1+) ve üstü rütbeler tarafından panel içerisinden yapılabilir.
+            </div>
+        </div>
+
+        <!-- Demo Memurlar Tablosu -->
+        <div class="mt-6 bg-slate-900/40 border border-slate-800/60 rounded-lg p-4 max-w-sm w-full text-xs">
+            <h4 class="font-bold text-slate-300 mb-2 font-mono"><i class="fa-solid fa-circle-info text-blue-500 mr-1"></i> Test Giriş Bilgileri (Hiyerarşi)</h4>
+            <div class="space-y-1 text-slate-400 font-mono">
+                <div class="flex justify-between border-b border-slate-800 pb-1">
+                    <span>Officer 1: John Doe</span>
+                    <span>Sicil: <b class="text-blue-400">LSPD-109</b></span>
+                    <span>Şifre: <b class="text-amber-400">7788</b></span>
+                </div>
+                <div class="flex justify-between border-b border-slate-800 pb-1">
+                    <span>Lieutenant 1: J. Sterling</span>
+                    <span>Sicil: <b class="text-blue-400">LSPD-24</b></span>
+                    <span>Şifre: <b class="text-amber-400">2424</b></span>
+                </div>
+                <div class="flex justify-between pt-1">
+                    <span>Chief: Miller</span>
+                    <span>Sicil: <b class="text-blue-400">LSPD-01</b></span>
+                    <span>Şifre: <b class="text-amber-400">9900</b></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= YENİ MEMUR KAYIT MODALI ================= -->
+    <div id="register-modal" class="hidden fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-[#090d16] border-2 border-[#1e293b] rounded-xl p-8 max-w-md w-full relative shadow-[0_0_50px_rgba(0,240,255,0.1)]">
+            <div class="absolute top-0 left-0 right-0 h-1 bg-cyan-500"></div>
+            
+            <div class="text-center mb-6">
+                <div class="inline-flex items-center justify-center w-14 h-14 bg-slate-950 border border-cyan-500/30 rounded-full mb-3 text-cyan-500">
+                    <i class="fa-solid fa-id-card text-2xl"></i>
+                </div>
+                <h3 class="text-xl font-bold text-white tracking-wide">Yeni Memur Oluşturma</h3>
+                <p class="text-xs text-slate-400 mt-1">Sistem tarafından Cadet olarak sicil ve şifre tanımlanacaktır.</p>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-400 mb-1 font-mono">Tam Adınız</label>
+                    <input type="text" id="reg-name" placeholder="James Sterling" class="w-full bg-slate-950 border border-slate-800 rounded px-4 py-2.5 text-white font-mono placeholder-slate-700 focus:outline-none focus:border-cyan-500 text-sm">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-400 mb-1 font-mono">Departman Branşı</label>
+                    <select id="reg-branch" class="w-full bg-slate-950 border border-slate-800 rounded px-4 py-2.5 text-slate-300 font-mono focus:outline-none focus:border-cyan-500 text-sm">
+                        <option value="Devriye Ekibi (Patrol)">Devriye Ekibi (Patrol)</option>
+                        <option value="Hızlı Yanıt Ekibi (SRU)">Hızlı Yanıt Ekibi (SRU)</option>
+                        <option value="Trafik Şube (Highway Patrol)">Trafik Şube (Highway Patrol)</option>
+                        <option value="K9 Departmanı">K9 Departmanı</option>
+                        <option value="Detektif Büro (CID)">Detektif Büro (CID)</option>
+                    </select>
+                </div>
+
+                <!-- Sonuç Gösterge Paneli -->
+                <div id="reg-result" class="hidden bg-slate-950 border border-cyan-500/30 rounded p-4 text-center space-y-2 font-mono">
+                    <p class="text-emerald-400 text-sm font-bold"><i class="fa-solid fa-circle-check"></i> KAYIT BAŞARILI!</p>
+                    <p class="text-xs text-slate-300">Aşağıdaki bilgileri güvenli bir yere kaydediniz:</p>
+                    <div class="bg-slate-900 py-2 px-3 rounded text-sm text-left space-y-1">
+                        <div class="flex justify-between">
+                            <span class="text-slate-500">Rozet Kodu:</span>
+                            <span class="text-cyan-400 font-bold" id="res-badge"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-500">Rütbe:</span>
+                            <span class="text-blue-400 font-bold">Cadet</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-500">Kişisel Şifre:</span>
+                            <span class="text-amber-400 font-bold" id="res-pass"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-2 pt-2">
+                    <button onclick="toggleRegisterForm(false)" id="reg-cancel-btn" class="flex-1 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold py-2.5 px-4 rounded text-xs uppercase tracking-wider transition-all">
+                        Kapat
+                    </button>
+                    <button onclick="createOfficer()" id="reg-submit-btn" class="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2.5 px-4 rounded text-xs uppercase tracking-wider transition-all">
+                        Sicil Oluştur
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= ANA PANEL (MDT WORKSPACE) ================= -->
+    <div id="mdt-dashboard" class="hidden flex-1 flex flex-col md:flex-row overflow-hidden">
+        
+        <!-- Sol Kenar Çubuğu (Sidebar): Hızlı Kontroller ve Profil -->
+        <aside class="w-full md:w-80 bg-slate-950 border-r border-[#1e293b] flex flex-col shrink-0 overflow-y-auto">
+            
+            <!-- Aktif Oturum Memuru -->
+            <div class="p-5 border-b border-[#1e293b] bg-slate-950 flex flex-col items-center text-center relative">
+                <div class="absolute top-0 left-0 right-0 h-1 bg-blue-500"></div>
+                
+                <div class="relative w-20 h-20 bg-slate-900 border border-blue-500/40 rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(0,85,255,0.15)] mb-3 text-blue-400">
+                    <i class="fa-solid fa-user-shield text-4xl"></i>
+                    <span id="officer-duty-dot" class="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-red-500 border-2 border-slate-950"></span>
+                </div>
+                
+                <h2 id="officer-name-display" class="font-bold text-white text-lg tracking-wide leading-tight">Yükleniyor...</h2>
+                <div class="flex flex-col items-center gap-1 mt-1">
+                    <div class="flex items-center gap-1.5">
+                        <span id="officer-badge-display" class="monospace-font text-xs text-cyan-400 bg-cyan-950/30 px-2 py-0.5 border border-cyan-800/30 rounded">...</span>
+                        <span id="officer-rank-display" class="text-[11px] text-slate-400 font-semibold tracking-wide uppercase">...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Navigasyon Sekmeleri -->
+            <nav class="p-4 space-y-1.5 flex-1 font-mono text-sm">
+                <button onclick="switchMdtTab('duty')" id="tab-btn-duty" class="mdt-tab-btn w-full px-4 py-3 rounded flex items-center gap-3 bg-blue-950/40 text-cyan-300 border border-blue-900/50">
+                    <i class="fa-solid fa-business-time text-base"></i> MESAI VE TAKIP
+                </button>
+                <button onclick="switchMdtTab('personnel')" id="tab-btn-personnel" class="mdt-tab-btn w-full px-4 py-3 rounded flex items-center gap-3 text-slate-400 hover:text-white hover:bg-slate-900/50 transition-all">
+                    <i class="fa-solid fa-users text-base"></i> PERSONEL SİCİLLERİ
+                </button>
+                <button onclick="switchMdtTab('database')" id="tab-btn-database" class="mdt-tab-btn w-full px-4 py-3 rounded flex items-center gap-3 text-slate-400 hover:text-white hover:bg-slate-900/50 transition-all">
+                    <i class="fa-solid fa-database text-base"></i> VERİTABANI SORGULAMA
+                </button>
+                <button onclick="switchMdtTab('announcements')" id="tab-btn-announcements" class="mdt-tab-btn w-full px-4 py-3 rounded flex items-center gap-3 text-slate-400 hover:text-white hover:bg-slate-900/50 transition-all relative">
+                    <i class="fa-solid fa-bullhorn text-base"></i> GENEL DUYURULAR
+                    <span class="absolute right-3 top-3.5 w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+                </button>
+                <button onclick="switchMdtTab('patrols')" id="tab-btn-patrols" class="mdt-tab-btn w-full px-4 py-3 rounded flex items-center gap-3 text-slate-400 hover:text-white hover:bg-slate-900/50 transition-all">
+                    <i class="fa-solid fa-street-view text-base"></i> AKTIF DEVRIYELER
+                </button>
+            </nav>
+
+            <!-- Taktiksel Departman Durumu / Kontroller -->
+            <div class="p-4 border-t border-[#1e293b] space-y-3 bg-[#05080e]/60 font-mono text-xs">
+                <div class="flex justify-between items-center text-slate-400">
+                    <span>AKTİF GÖREV DURUMUNUZ:</span>
+                    <span class="text-emerald-500 font-bold" id="threat-level">DEVRIYEDE DEGIL</span>
+                </div>
+                <div class="grid grid-cols-2 gap-1.5">
+                    <button onclick="changeThreatLevel('LSPD_CODE1')" class="bg-emerald-950/40 hover:bg-emerald-900/40 border border-emerald-800/40 text-emerald-400 py-1 rounded text-center transition-all">CODE 1</button>
+                    <button onclick="changeThreatLevel('LSPD_CODE2')" class="bg-amber-950/40 hover:bg-amber-900/40 border border-amber-800/40 text-amber-400 py-1 rounded text-center transition-all">CODE 2</button>
+                    <button onclick="changeThreatLevel('LSPD_CODE3')" class="col-span-2 bg-red-950/40 hover:bg-red-900/40 border border-red-800/40 text-red-400 py-1.5 rounded text-center transition-all font-bold animate-pulse">ACIL DURUM (KOD 3)</button>
+                    <button onclick="changeThreatLevel('LSPD_CODE7')" class="bg-indigo-950/40 hover:bg-indigo-900/40 border border-indigo-800/40 text-indigo-400 py-1 rounded text-center transition-all">KOD-7 (MEŞGUL)</button>
+                    <button onclick="changeThreatLevel('LSPD_DEPT')" class="bg-blue-950/40 hover:bg-blue-900/40 border border-blue-800/40 text-blue-400 py-1 rounded text-center transition-all">DEPARTMANDA</button>
+                    <button onclick="changeThreatLevel('LSPD_YEMEK')" class="col-span-2 bg-orange-950/40 hover:bg-orange-900/40 border border-orange-800/40 text-orange-400 py-1.5 rounded text-center transition-all font-semibold">YEMEK MOLASI</button>
+                    
+                    <button onclick="changeThreatLevel('LSPD_1009')" class="bg-purple-950/40 hover:bg-purple-900/40 border border-purple-800/40 text-purple-400 py-1 rounded text-center transition-all font-semibold">10-09</button>
+                    <button onclick="changeThreatLevel('LSPD_SUSPECT')" class="bg-rose-950/40 hover:bg-rose-900/40 border border-rose-800/40 text-rose-400 py-1 rounded text-center transition-all font-semibold animate-pulse">ŞÜPHELİ İŞLEMLERİ</button>
+                </div>
+            </div>
+
+            <!-- Oturumu Kapat / Çıkış Yap -->
+            <div class="p-4 border-t border-[#1e293b] flex gap-2">
+                <button onclick="toggleMute()" id="mute-btn" class="bg-slate-900 hover:bg-slate-800 text-slate-400 p-3 rounded transition-all" title="Ses Aç/Kapat">
+                    <i class="fa-solid fa-volume-high"></i>
+                </button>
+                <button onclick="logout()" class="flex-1 bg-red-950 hover:bg-red-900 text-red-200 border border-red-900/40 font-bold py-2 px-4 rounded text-sm transition-all flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i> TERMINAL ÇIKIŞI
+                </button>
+            </div>
+        </aside>
+
+        <!-- Sağ Taraf: Ana Çalışma Paneli (Workspace) -->
+        <main class="flex-1 flex flex-col overflow-hidden bg-[#03050a] relative">
+            
+            <!-- Terminal Üst Başlığı -->
+            <header class="bg-slate-950 border-b border-[#1e293b] px-6 py-4 flex justify-between items-center shrink-0">
+                <div class="flex items-center gap-3">
+                    <span class="text-blue-500 text-xl font-bold"><i class="fa-solid fa-desktop"></i></span>
+                    <h3 class="font-bold text-white text-base font-sans tracking-wide">MDT-OS v4.5 // LSPD SECURED NET</h3>
+                </div>
+                <!-- Canlı Dijital Saat ve Rütbe Bilgisi -->
+                <div class="flex items-center gap-4 text-xs font-mono">
+                    <!-- RÜTBE GÖSTERGESİ (Sağ Üst Köşe) -->
+                    <div class="bg-blue-950/60 border border-blue-900/50 px-3 py-1.5 rounded text-cyan-300 font-bold flex items-center gap-1.5">
+                        <i class="fa-solid fa-id-card"></i>
+                        <span>RÜTBE:</span>
+                        <span id="header-rank-display" class="text-white uppercase font-sans">CADET</span>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded text-slate-400 hidden sm:block">
+                        IP: <span class="text-cyan-400">192.168.99.102</span>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded text-slate-400">
+                        TARIH/SAAT: <span class="text-white" id="live-time">00:00:00</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- ================= WORKSPACE PANEL DEĞİŞKENLERİ ================= -->
+            <div class="flex-1 p-6 overflow-y-auto relative">
+                
+                <!-- ================= SEKMELER: PERSONEL SİCİLLERİ ================= -->
+                <section id="mdt-tab-content-personnel" class="space-y-6 hidden font-mono">
+                    <div class="bg-[#090d16] border border-[#1e293b] rounded-xl p-6">
+                        <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center border-b border-slate-800 pb-3 mb-4 gap-2">
+                            <div>
+                                <h4 class="font-bold text-white text-lg font-sans tracking-wider"><i class="fa-solid fa-users text-cyan-400 mr-2"></i> DEPARTMAN PERSONEL SİCİLLERİ</h4>
+                                <p class="text-xs text-slate-400 mt-1">Aktif kayıtlı tüm memurların bilgileri, rütbeleri ve çalışma durumları.</p>
+                            </div>
+                            <div class="flex items-center gap-2 self-start sm:self-center flex-wrap">
+                                <span id="management-privilege-badge" class="text-xs bg-slate-900 text-slate-500 border border-slate-800 px-3 py-1 rounded font-bold">Kısıtlı Yetki</span>
+                                <button id="add-new-officer-btn" onclick="toggleRegisterForm(true)" class="hidden text-xs bg-cyan-600 hover:bg-cyan-700 text-white border border-cyan-500 px-3 py-1 rounded font-bold transition-all">
+                                    <i class="fa-solid fa-user-plus mr-1"></i> Yeni Memur Kaydet
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse text-xs">
+                                <thead>
+                                    <tr class="bg-slate-950 text-slate-400 border-b border-slate-800">
+                                        <th class="p-3">ROZET KODU</th>
+                                        <th class="p-3">SİCİL ADI</th>
+                                        <th class="p-3">RÜTBE</th>
+                                        <th class="p-3">DEPARTMAN BRANŞI</th>
+                                        <th class="p-3">ERİŞİM ŞİFRESİ</th>
+                                        <th class="p-3 text-right">İŞLEMLER</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="personnel-list-body" class="text-slate-300">
+                                    <!-- Dinamik Personel Verileri -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+                
+                <!-- ================= SEKMELER 1: MESAİ TAKİP PANELİ ================= -->
+                <section id="mdt-tab-content-duty" class="space-y-6">
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        <!-- Mesai Giriş/Çıkış Kontrol Kutusu -->
+                        <div class="lg:col-span-7 bg-[#090d16] border border-[#1e293b] rounded-xl p-6 flex flex-col justify-between relative overflow-hidden shadow-lg">
+                            <div class="absolute -right-16 -bottom-16 text-slate-900 opacity-20 pointer-events-none">
+                                <i class="fa-solid fa-business-time text-9xl"></i>
+                            </div>
+
+                            <div>
+                                <div class="flex justify-between items-center mb-6">
+                                    <h4 class="font-bold text-white text-lg font-sans tracking-wider"><i class="fa-solid fa-stopwatch text-cyan-400 mr-2"></i> MESAI GIRIŞ VE KONTROL PANELI</h4>
+                                    <span id="badge-status-pill" class="bg-red-500/15 border border-red-500/30 text-red-400 text-xs font-mono font-bold px-3 py-1 rounded">MESAIDE DEGIL (OFF-DUTY)</span>
+                                </div>
+
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 my-6">
+                                    <!-- Sol Kolon: Aktif Sayıcı -->
+                                    <div class="bg-slate-950 p-4 border border-slate-900 rounded-lg flex flex-col justify-center items-center">
+                                        <span class="text-xs text-slate-500 font-mono tracking-wider">AKTİF SÜRE (BU SEANS)</span>
+                                        <div id="live-shift-counter" class="text-3xl font-bold text-slate-500 font-mono tracking-widest mt-2">00:00:00</div>
+                                    </div>
+
+                                    <!-- Sağ Kolon: Günlük Toplam Mesai -->
+                                    <div class="bg-slate-950 p-4 border border-slate-900 rounded-lg flex flex-col justify-center items-center">
+                                        <span class="text-xs text-slate-500 font-mono tracking-wider">BUGÜN YAPILAN TOPLAM MESAI</span>
+                                        <div id="total-shift-today" class="text-3xl font-bold text-cyan-400 font-mono tracking-widest mt-2">00 SAAT 00 DK</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Tetikleme Butonları -->
+                            <div class="flex gap-4 pt-4 border-t border-slate-900">
+                                <button onclick="startDuty()" id="start-duty-btn" class="flex-1 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold py-3.5 px-6 rounded-lg text-sm tracking-widest uppercase transition-all flex items-center justify-center gap-2 border border-emerald-500/30 shadow-lg shadow-emerald-500/10">
+                                    <i class="fa-solid fa-play"></i> MESAİYİ BAŞLAT (ON-DUTY)
+                                </button>
+                                <button onclick="endDuty()" id="end-duty-btn" class="flex-1 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-bold py-3.5 px-6 rounded-lg text-sm tracking-widest uppercase transition-all flex items-center justify-center gap-2 border border-red-500/30 shadow-lg shadow-red-500/10 hidden">
+                                    <i class="fa-solid fa-stop"></i> MESAİYİ BİTİR (OFF-DUTY)
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Memur İstatistikleri / Genel Bilgi -->
+                        <div class="lg:col-span-5 bg-[#090d16] border border-[#1e293b] rounded-xl p-6 flex flex-col justify-between">
+                            <h4 class="font-bold text-white text-base mb-4 font-sans tracking-wider"><i class="fa-solid fa-gauge-high text-cyan-500 mr-2"></i> PERFORMANS ÖZETİ</h4>
+                            
+                            <div class="space-y-3.5 font-mono text-xs">
+                                <div class="flex justify-between border-b border-slate-900 pb-2">
+                                    <span class="text-slate-400">MEMUR BRANŞI:</span>
+                                    <span class="text-white" id="stat-branch">Yükleniyor...</span>
+                                </div>
+                                <div class="flex justify-between border-b border-slate-900 pb-2">
+                                    <span class="text-slate-400">BUGÜNKÜ MESAİ GİRİŞ SIKLIĞI:</span>
+                                    <span class="text-cyan-400 font-bold" id="stat-count">0 DEFA</span>
+                                </div>
+                                <div class="flex justify-between border-b border-slate-900 pb-2">
+                                    <span class="text-slate-400">HAFTALIK TOPLAM HEDEF:</span>
+                                    <span class="text-slate-300">15 SAAT</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-slate-400">SİSTEM DURUMU:</span>
+                                    <span class="text-emerald-500 font-semibold flex items-center gap-1">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> AKTiF / KAYDEDiYOR
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="mt-4 p-3 bg-blue-950/15 border border-blue-900/30 rounded text-[11px] text-blue-300 font-mono leading-relaxed">
+                                <i class="fa-solid fa-triangle-exclamation mr-1 text-amber-500"></i> MDT Kuralları Gereği: Mesai takibini başlatmadan devriye araçlarına binilmesi ve telsiz koduna geçilmesi yasaktır.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Mesai Logları Tablosu -->
+                    <div class="bg-[#090d16] border border-[#1e293b] rounded-xl p-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h4 class="font-bold text-white text-base font-sans tracking-wider"><i class="fa-solid fa-list-check text-cyan-400 mr-2"></i> BUGÜNKÜ MESAI GECMISI VE SÜRELER</h4>
+                            <button onclick="clearShifts()" class="text-xs text-red-400 hover:text-red-300 transition font-mono"><i class="fa-solid fa-trash-can mr-1"></i> Geçmişi Temizle</button>
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse text-xs font-mono">
+                                <thead>
+                                    <tr class="bg-slate-950 text-slate-400 border-b border-slate-800">
+                                        <th class="p-3">İŞLEM KODU</th>
+                                        <th class="p-3">BAŞLANGIÇ SAATİ</th>
+                                        <th class="p-3">BİTİŞ SAATİ</th>
+                                        <th class="p-3">GEÇEN SÜRE (DURASYON)</th>
+                                        <th class="p-3">DURUM</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="shift-logs-body" class="text-slate-300">
+                                    <tr id="empty-shift-row">
+                                        <td colspan="5" class="p-6 text-center text-slate-500 font-mono">Bugün henüz bir mesai kaydı bulunmamaktadır. Göreve başlayarak ilk mesainizi başlatın!</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ================= SEKMELER 2: VERİBATANI SORGULAMA PANELİ ================= -->
+                <section id="mdt-tab-content-database" class="space-y-6 hidden font-mono">
+                    <div class="bg-[#090d16] border border-[#1e293b] rounded-xl p-6">
+                        <h4 class="font-bold text-white text-base mb-2 font-sans tracking-wider"><i class="fa-solid fa-magnifying-glass text-cyan-400 mr-2"></i> LOS SANTOS FEDERAL VERITABANI SORGUSU</h4>
+                        <p class="text-xs text-slate-400 mb-6">Arama yapmak istediğiniz şüpheli ismini veya plaka kodunu aşağıdaki bölüme giriniz.</p>
+
+                        <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+                            <!-- Şüpheli Arama Girişi -->
+                            <div class="md:col-span-8 flex gap-2">
+                                <div class="relative flex-1">
+                                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500"><i class="fa-solid fa-fingerprint"></i></span>
+                                    <input type="text" id="db-search-input" placeholder="İsim (Örn: Trevor, Michael) veya Araç Plakası (Örn: 23ABC45)..." class="w-full bg-slate-950 border border-slate-800 rounded px-4 py-3 pl-10 text-white placeholder-slate-700 focus:outline-none focus:border-cyan-500 text-sm">
+                                </div>
+                                <button onclick="searchDatabase()" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold px-6 py-3 rounded text-xs uppercase tracking-wider font-sans transition-all flex items-center gap-2 shrink-0">
+                                    <i class="fa-solid fa-magnifying-glass"></i> Sorgula
+                                </button>
+                            </div>
+                            
+                            <!-- Hızlı Aramalar Filtre -->
+                            <div class="md:col-span-4 bg-slate-950 border border-slate-900 rounded p-1.5 flex gap-1 text-xs">
+                                <button onclick="setSearchFilter('suspect')" id="filter-suspect" class="flex-1 py-1 rounded text-center bg-cyan-950/40 text-cyan-400 border border-cyan-900/30">ŞÜPHELİLER</button>
+                                <button onclick="setSearchFilter('vehicle')" id="filter-vehicle" class="flex-1 py-1 rounded text-center text-slate-400 hover:text-white">ARAÇLAR</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sorgulama Sonuç Ekranı -->
+                    <div id="search-result-panel" class="hidden bg-[#090d16] border border-[#1e293b] rounded-xl p-6 space-y-6">
+                        <div class="flex justify-between items-center border-b border-slate-900 pb-3">
+                            <h4 class="font-bold text-white text-base font-sans uppercase tracking-wider text-cyan-400" id="result-title">SORGULAMA SONUCU</h4>
+                            <span class="text-xs bg-red-950/30 border border-red-900/30 text-red-500 px-3 py-1 rounded font-bold animate-pulse" id="result-warning-badge">ARANIYOR (WANTED)</span>
+                        </div>
+
+                        <!-- Şüpheli Kartı Detayı -->
+                        <div id="suspect-result-detail" class="grid grid-cols-1 md:grid-cols-12 gap-6 hidden">
+                            <!-- Profil Resmi Mock -->
+                            <div class="md:col-span-3 flex justify-center">
+                                <div class="w-full max-w-[200px] aspect-square bg-slate-950 border border-slate-800 rounded-lg flex flex-col justify-center items-center text-slate-600 relative overflow-hidden">
+                                    <i class="fa-solid fa-user text-8xl"></i>
+                                    <div class="absolute bottom-0 inset-x-0 bg-slate-900/80 py-1.5 text-center text-[10px] text-slate-400">MOCK_DNA_MATCHED</div>
+                                </div>
+                            </div>
+                            <!-- Kimlik Bilgileri -->
+                            <div class="md:col-span-9 space-y-4 text-xs">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                        <p class="text-slate-500">İSİM SOYİSİM</p>
+                                        <p class="text-sm font-bold text-white" id="susp-name">-</p>
+                                    </div>
+                                    <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                        <p class="text-slate-500">CİNSİYET & YAŞ</p>
+                                        <p class="text-sm font-bold text-white" id="susp-age">-</p>
+                                    </div>
+                                    <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                        <p class="text-slate-500">EHLİYET DURUMU</p>
+                                        <p class="text-sm font-bold text-emerald-400" id="susp-license">VAR / AKTİF</p>
+                                    </div>
+                                    <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                        <p class="text-slate-500">MEVCUT ARANMA DERECESİ</p>
+                                        <p class="text-sm font-bold text-red-500 animate-pulse" id="susp-wanted-level">YÜKSEK (KOD 5)</p>
+                                    </div>
+                                </div>
+                                <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                    <p class="text-slate-500 mb-1">GEÇMİŞ SUÇ KAYITLARI & ADLİ SİCİL</p>
+                                    <p class="text-slate-300 leading-relaxed text-xs" id="susp-records">Geçmiş suç kaydı temiz.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Araç Kartı Detayı -->
+                        <div id="vehicle-result-detail" class="grid grid-cols-1 md:grid-cols-12 gap-6 hidden">
+                            <div class="md:col-span-3 flex justify-center">
+                                <div class="w-full max-w-[200px] aspect-square bg-slate-950 border border-slate-800 rounded-lg flex flex-col justify-center items-center text-slate-600 relative overflow-hidden">
+                                    <i class="fa-solid fa-car text-8xl"></i>
+                                    <div class="absolute bottom-0 inset-x-0 bg-slate-900/80 py-1.5 text-center text-[10px] text-slate-400">PLATE_VERIFIED</div>
+                                </div>
+                            </div>
+                            <div class="md:col-span-9 space-y-4 text-xs">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                        <p class="text-slate-500">ARAÇ MARKASI & MODELİ</p>
+                                        <p class="text-sm font-bold text-white" id="veh-model">-</p>
+                                    </div>
+                                    <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                        <p class="text-slate-500">PLAKA NUMARASI</p>
+                                        <p class="text-sm font-bold text-white text-cyan-400" id="veh-plate">-</p>
+                                    </div>
+                                    <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                        <p class="text-slate-500">RUHSAT SAHİBİ</p>
+                                        <p class="text-sm font-bold text-white" id="veh-owner">-</p>
+                                    </div>
+                                    <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                        <p class="text-slate-500">SİGORTA DURUMU</p>
+                                        <p class="text-sm font-bold text-emerald-400" id="veh-insurance">-</p>
+                                    </div>
+                                </div>
+                                <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                    <p class="text-slate-500">BİLDİRİLEN ARANMA NOTU / DURUMU</p>
+                                    <p class="text-slate-300 font-bold" id="veh-status">-</p>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </section>
+
+                <!-- ================= SEKMELER 3: DUYURULAR PANELİ ================= -->
+                <section id="mdt-tab-content-announcements" class="space-y-6 hidden font-mono">
+                    <div class="bg-[#090d16] border border-[#1e293b] rounded-xl p-6">
+                        <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-6">
+                            <h4 class="font-bold text-white text-base font-sans tracking-wider"><i class="fa-solid fa-bullhorn text-cyan-400 mr-2"></i> ŞEF RÜTBELİ MEMUR TALİMATLARI VE DUYURULAR</h4>
+                            <span class="text-xs bg-red-950/20 text-red-400 border border-red-900/30 px-3 py-1 rounded">GÜNCEL</span>
+                        </div>
+
+                        <div class="space-y-4 text-xs">
+                            <div class="bg-slate-950 p-4 rounded-lg border-l-4 border-amber-500">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="text-amber-500 font-bold uppercase"><i class="fa-solid fa-triangle-exclamation"></i> DEVRİYE BÖLGESİ ALARMI</span>
+                                    <span class="text-slate-500 text-[10px]">Bugün, 14:32 // Şef Miller</span>
+                                </div>
+                                <p class="text-slate-300 leading-relaxed">
+                                    Los Santos Gümrük iskelesi ve Sandy Shores otobanı civarında yasa dışı sokak yarışları rapor edilmiştir. Trafik Şube ekiplerinin o bölgelerdeki devriyelerini sıklaştırması, şüpheli araçların MDT veritabanından plaka sorgularının geciktirilmeden yapılması emredilmiştir.
+                                </p>
+                            </div>
+
+                            <div class="bg-slate-950 p-4 rounded-lg border-l-4 border-blue-500">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="text-blue-400 font-bold uppercase"><i class="fa-solid fa-shield"></i> TELSİZ PROTOKOLÜ HATIRLATMASI</span>
+                                    <span class="text-slate-500 text-[10px]">Dün, 09:15 // Şerif Yardımcısı Sterling</span>
+                                </div>
+                                <p class="text-slate-300 leading-relaxed">
+                                    Tüm personellerin mesaiye girdikten sonra derhal telsiz odasında yerlerini almaları ve 10-8 (Göreve Hazır) kodu bildirmeleri zorunludur. Telsiz sessizliği (Code 1) durumlarında sadece kritik çağrılar yapılacaktır.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ================= SEKMELER 4: AKTİF DEVRIYELER (GRID MAP SIM) ================= -->
+                <section id="mdt-tab-content-patrols" class="space-y-6 hidden">
+                    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        
+                        <!-- DEVRİYE OLUŞTURMA PANELİ -->
+                        <div class="lg:col-span-5 bg-[#090d16] border border-[#1e293b] rounded-xl p-6 font-mono text-xs space-y-4">
+                            <h4 class="font-bold text-white text-base font-sans tracking-wider"><i class="fa-solid fa-plus text-cyan-400 mr-2"></i> YENİ DEVRİYE OLUŞTUR</h4>
+                            
+                            <!-- Hata Mesaj Alanı -->
+                            <div id="patrol-error" class="hidden bg-red-950/30 border border-red-900/50 p-3 rounded text-red-400">
+                                <i class="fa-solid fa-triangle-exclamation mr-1.5"></i> <span id="patrol-error-text">HATA</span>
+                            </div>
+
+                            <!-- Memur Seçimi -->
+                            <div class="space-y-2">
+                                <label class="block text-slate-400 font-bold">1. PERSONEL SEÇİMİ (Çoklu Seçilebilir)</label>
+                                <div id="patrol-officers-checklist" class="bg-slate-950 border border-slate-900 rounded p-3 space-y-2 max-h-[160px] overflow-y-auto">
+                                    <!-- Dinamik olarak aktif memurlar checkbox olarak yüklenecek -->
+                                </div>
+                            </div>
+
+                            <!-- Devriye Tipi -->
+                            <div class="space-y-2">
+                                <label class="block text-slate-400 font-bold">2. DEVRİYE TİPİ SEÇİMİ</label>
+                                <select id="patrol-type-select" class="w-full bg-slate-950 border border-slate-900 rounded p-2 text-slate-300 focus:outline-none focus:border-cyan-500">
+                                    <option value="Lincoln">Lincoln (L) - Tek Kişilik Devriye</option>
+                                    <option value="Adam">Adam (A) - İki Kişilik Devriye</option>
+                                    <option value="David">David (D) - Üç Kişilik Devriye</option>
+                                    <option value="Charles">Charles (C) - Dört Kişilik Devriye</option>
+                                    <option value="Edward">Edward (E) - HSU Birimi (1-3 Kişi)</option>
+                                    <option value="Mary">Mary (M) - Motorize Birim (1 Kişi)</option>
+                                    <option value="Hudson">Hudson (H) - Özel Devriye (1-2 Kişi)</option>
+                                </select>
+                            </div>
+
+                            <button onclick="createNewPatrol()" class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2.5 rounded transition-all flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-shield-halved"></i> DEVRİYEYİ BAŞLAT
+                            </button>
+                        </div>
+
+                        <!-- AKTİF DEVRİYELER LİSTESİ -->
+                        <div class="lg:col-span-7 bg-[#090d16] border border-[#1e293b] rounded-xl p-6 flex flex-col">
+                            <h4 class="font-bold text-white text-base mb-4 font-sans tracking-wider"><i class="fa-solid fa-tower-broadcast text-cyan-400 mr-2"></i> AKTİF DEVRİYE BİRİMLERİ</h4>
+                            
+                            <div class="space-y-4 font-mono text-xs flex-1 max-h-[420px] overflow-y-auto pr-2" id="active-units-list">
+                                <!-- Dinamik Devriye Kartları buraya dolacak -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- MESAİ BİTİRİLİNCE ÇIKAN SÜRE BİLGİ KART MODALI -->
+    <div id="duty-result-modal" class="hidden fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-[#090d16] border-2 border-[#1e293b] rounded-xl p-8 max-w-sm w-full relative shadow-[0_0_50px_rgba(239,68,68,0.15)] text-center">
+            <div class="absolute top-0 left-0 right-0 h-1 bg-red-500"></div>
+            
+            <div class="inline-flex items-center justify-center w-14 h-14 bg-red-950/50 border border-red-500/30 rounded-full mb-4 text-red-500 animate-pulse">
+                <i class="fa-solid fa-clock-rotate-left text-2xl"></i>
+            </div>
+            
+            <h3 class="text-xl font-bold text-white tracking-wide">Mesai Raporu</h3>
+            <p class="text-xs text-slate-400 mt-1 font-mono">Mesainiz başarıyla sonlandırılmıştır.</p>
+
+            <div class="bg-slate-950 p-4 border border-slate-900 rounded-lg my-5 font-mono">
+                <p class="text-xs text-slate-500 uppercase tracking-wider">MESAİDE KALINAN SÜRE</p>
+                <p class="text-2xl font-bold text-cyan-400 mt-1" id="duty-reported-duration">00:00:00</p>
+            </div>
+
+            <p class="text-[11px] text-slate-500 font-mono mb-4 leading-relaxed">
+                İlgili mesai süresi departman sicil kaydınıza otomatik olarak işlenmiştir. İyi istirahatler memur!
+            </p>
+
+            <button onclick="closeDutyReportModal()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-4 rounded text-xs uppercase tracking-wider transition-all border border-slate-800">
+                Terminale Geri Dön
+            </button>
+        </div>
+    </div>
+
+    <!-- ================= MEMUR DÜZENLEME MODALİ (SADECE LIEUTENANT+) ================= -->
+    <div id="edit-officer-modal" class="hidden fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-[#090d16] border-2 border-[#1e293b] rounded-xl p-8 max-w-md w-full relative shadow-[0_0_50px_rgba(245,158,11,0.15)] font-mono">
+            <div class="absolute top-0 left-0 right-0 h-1 bg-amber-500"></div>
+            
+            <div class="text-center mb-6">
+                <div class="inline-flex items-center justify-center w-14 h-14 bg-amber-950/40 border border-amber-500/30 rounded-full mb-3 text-amber-500">
+                    <i class="fa-solid fa-user-gear text-2xl"></i>
+                </div>
+                <h3 class="text-xl font-bold text-white tracking-wide font-sans">Sicil Güncelleme</h3>
+                <p class="text-xs text-slate-400 mt-1">Yönetici Paneli: Memurun bilgilerini ve rütbesini düzenleyin.</p>
+            </div>
+
+            <div class="space-y-4 text-xs">
+                <!-- Hedef Eski Rozeti Tutan Gizli Input -->
+                <input type="hidden" id="edit-target-badge-hidden">
+                
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Rozet Kodu</label>
+                    <input type="text" id="edit-badge" class="w-full bg-slate-950 border border-slate-800 rounded px-4 py-2.5 text-white focus:outline-none focus:border-amber-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Tam Adı</label>
+                    <input type="text" id="edit-name" class="w-full bg-slate-950 border border-slate-800 rounded px-4 py-2.5 text-white focus:outline-none focus:border-amber-500">
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Branş / Şube</label>
+                    <input type="text" id="edit-branch" class="w-full bg-slate-950 border border-slate-800 rounded px-4 py-2.5 text-white focus:outline-none focus:border-amber-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Erişim Şifresi</label>
+                    <input type="text" id="edit-password" maxlength="6" class="w-full bg-slate-950 border border-slate-800 rounded px-4 py-2.5 text-white focus:outline-none focus:border-amber-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Yeni Rütbe Ata</label>
+                    <select id="edit-rank" class="w-full bg-slate-950 border border-slate-800 rounded px-4 py-2.5 text-slate-300 focus:outline-none focus:border-amber-500">
+                        <!-- JS dinamik rütbe seçeneklerini dolduracak -->
+                    </select>
+                </div>
+
+                <div class="flex gap-2 pt-2">
+                    <button onclick="closeEditOfficerModal()" class="flex-1 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold py-2.5 px-4 rounded text-xs uppercase tracking-wider transition-all">
+                        İptal
+                    </button>
+                    <button onclick="saveOfficerEdits()" class="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 px-4 rounded text-xs uppercase tracking-wider transition-all">
+                        Sicili Güncelle
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= BİRİM ÜYESİ YÖNETİM MODALİ ================= -->
+    <div id="member-action-modal" class="hidden fixed inset-0 bg-black/95 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-[#090d16] border-2 border-[#1e293b] rounded-xl p-6 max-w-sm w-full relative shadow-[0_0_30px_rgba(0,240,255,0.15)] font-mono text-xs text-slate-300">
+            <div class="absolute top-0 left-0 right-0 h-1 bg-cyan-500"></div>
+            <div class="text-center mb-5">
+                <h3 class="text-base font-bold text-white uppercase tracking-wider" id="member-action-title">ÜYE İŞLEMLERİ</h3>
+                <p class="text-[11px] text-slate-500 mt-1" id="member-action-subtitle">Memur Bilgisi</p>
+            </div>
+            
+            <input type="hidden" id="action-patrol-id">
+            <input type="hidden" id="action-officer-badge">
+            
+            <div class="space-y-2">
+                <button onclick="makeUnitCommander()" class="w-full bg-cyan-600/20 hover:bg-cyan-600/40 text-cyan-400 border border-cyan-500/30 py-3 rounded font-bold transition-all flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-crown"></i> BİRİM AMİRİ YAP
+                </button>
+                <button onclick="kickFromUnit()" class="w-full bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 py-3 rounded font-bold transition-all flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-user-slash"></i> BİRİMDEN AT
+                </button>
+                <button onclick="closeMemberActionModal()" class="w-full bg-slate-900 hover:bg-slate-800 py-2.5 rounded transition-all">
+                    İPTAL
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= DEVRIYEYE ÜYE EKLEME MODALİ (YENİ) ================= -->
+    <div id="add-member-modal" class="hidden fixed inset-0 bg-black/95 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-[#090d16] border-2 border-[#1e293b] rounded-xl p-6 max-w-sm w-full relative shadow-[0_0_30px_rgba(0,240,255,0.15)] font-mono text-xs text-slate-300">
+            <div class="absolute top-0 left-0 right-0 h-1 bg-cyan-500"></div>
+            <div class="text-center mb-5">
+                <h3 class="text-base font-bold text-white uppercase tracking-wider">DEVRIYEYE MEMUR EKLE</h3>
+                <p class="text-[11px] text-slate-500 mt-1">LSPD Müsait Memur Listesi</p>
+            </div>
+            
+            <input type="hidden" id="add-member-patrol-id">
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-slate-400 font-bold mb-1.5">MÜSAİT BİR PERSONEL SEÇİN</label>
+                    <select id="add-member-select" class="w-full bg-slate-950 border border-slate-900 rounded p-2.5 text-slate-300 focus:outline-none focus:border-cyan-500">
+                        <!-- Dinamik doldurulacak -->
+                    </select>
+                </div>
+                
+                <div class="flex gap-2 pt-2">
+                    <button onclick="closeAddMemberModal()" class="flex-1 bg-slate-900 hover:bg-slate-800 py-2.5 rounded transition-all">
+                        İPTAL
+                    </button>
+                    <button onclick="submitAddMember()" class="flex-1 bg-cyan-600 hover:bg-cyan-700 py-2.5 rounded font-bold text-white transition-all">
+                        DEVRIYEYE EKLE
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= SİSTEM UYARI MODALİ (ALERT YERİNE) ================= -->
+    <div id="sys-alert-modal" class="hidden fixed inset-0 bg-black/95 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
+        <div class="bg-[#090d16] border-2 border-red-500 rounded-xl p-6 max-w-sm w-full relative shadow-[0_0_50px_rgba(239,68,68,0.3)] font-mono text-xs text-slate-300">
+            <div class="absolute top-0 left-0 right-0 h-1 bg-red-500"></div>
+            <div class="text-center space-y-4">
+                <div class="inline-flex items-center justify-center w-12 h-12 bg-red-950/40 border border-red-500/30 rounded-full text-red-500 animate-pulse">
+                    <i class="fa-solid fa-triangle-exclamation text-xl"></i>
+                </div>
+                <h4 class="text-sm font-bold text-white uppercase tracking-wider font-sans">MDT SİSTEM PROTOKOL UYARISI</h4>
+                <p id="sys-alert-text" class="text-slate-400 leading-relaxed font-mono"></p>
+                <button onclick="closeSysAlert()" class="w-full bg-slate-900 hover:bg-slate-800 py-2.5 rounded font-bold text-red-400 border border-red-900/30 transition-all font-sans">
+                    PROTOKOLÜ KABUL ET
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= JAVASCRIPT KONTROLLERİ VE BELLEK VERİLERİ ================= -->
+    <script>
+        // Rütbeler Hiyerarşisi ve Ağırlıkları
+        const RANKS = [
+            { id: "cadet", name: "Cadet", weight: 1 },
+            { id: "officer_1", name: "Officer 1", weight: 2 },
+            { id: "officer_2", name: "Officer 2", weight: 3 },
+            { id: "officer_3", name: "Officer 3", weight: 4 },
+            { id: "senior_officer_1", name: "Senior Officer 1", weight: 5 },
+            { id: "senior_officer_2", name: "Senior Officer 2", weight: 6 },
+            { id: "senior_officer_3", name: "Senior Officer 3", weight: 7 },
+            { id: "sergeant_1", name: "Sergeant 1", weight: 8 },
+            { id: "sergeant_2", name: "Sergeant 2", weight: 9 },
+            { id: "senior_sergeant_1", name: "Senior Sergeant 1", weight: 10 },
+            { id: "senior_sergeant_2", name: "Senior Sergeant 2", weight: 11 },
+            { id: "lieutenant_1", name: "Lieutenant 1", weight: 12 },
+            { id: "lieutenant_2", name: "Lieutenant 2", weight: 13 },
+            { id: "captain_1", name: "Captain 1", weight: 14 },
+            { id: "captain_2", name: "Captain 2", weight: 15 },
+            { id: "chief_of_department", name: "Chief of Department", weight: 16 }
+        ];
+
+        // Sitede aranabilecek hazır şüpheli/araç veritabanı
+        const mockDatabase = {
+            suspects: [
+                {
+                    id: "Trevor Philips",
+                    name: "Trevor Philips",
+                    age: "45 / Erkek",
+                    license: "IPTAL EDILMIŞ / GEÇERSIZ",
+                    wantedLevel: "KIRMIZI (KOD 5) - GÖRÜLDÜĞÜ YERDE TUTUKLAMA",
+                    records: "Kamu malına zarar, kaçakçılık, silahlı soygun, polise mukavemet, ruhsatsız otomatik silah taşıma."
+                },
+                {
+                    id: "Michael De Santa",
+                    name: "Michael De Santa",
+                    age: "48 / Erkek",
+                    license: "VAR / AKTİF",
+                    wantedLevel: "DÜŞÜK SEVİYE - ŞÜPHELİ TAKİP",
+                    records: "Geçmişte federal suçlar nedeniyle gözetim altındaydı. Yakın zamanda borsa spekülasyonu ve şüpheli mülk alımları bildirildi."
+                },
+                {
+                    id: "Franklin Clinton",
+                    name: "Franklin Clinton",
+                    age: "26 / Erkek",
+                    license: "VAR / AKTİF",
+                    wantedLevel: "TEMİZ / ARANMIYOR",
+                    records: "Oto hırsızlığı (şüpheli), sokak yarışları ihbarı mevcuttur ancak adli sicili şu an temizdir."
+                }
+            ],
+            vehicles: [
+                {
+                    id: "23ABC45",
+                    model: "Karin Sultan RS (Mavi)",
+                    plate: "23ABC45",
+                    owner: "Franklin Clinton",
+                    insurance: "AKTİF / SİGORTALI",
+                    status: "TEMİZ - ARANMASI YOK"
+                },
+                {
+                    id: "99XRF01",
+                    model: "Canis Bodhi (Kirli Kahve)",
+                    plate: "99XRF01",
+                    owner: "Trevor Philips",
+                    insurance: "GEÇERSİZ SİGORTA",
+                    status: "ARANIYOR - ÇALINTI İHBARI MEVCUT (Görülürse direkt müdahale edin!)"
+                }
+            ]
+        };
+
+        // Oturumdaki ve Kayıtlı Memurlar
+        let officers = [
+            { badge: "LSPD-109", name: "John Doe", password: "7788", rank: "Officer 1", branch: "Devriye Ekibi (Patrol)" },
+            { badge: "LSPD-24", name: "James Sterling", password: "2424", rank: "Lieutenant 1", branch: "CID (Detektif Büro)" },
+            { badge: "LSPD-12", name: "Sarah Connor", password: "1212", rank: "Sergeant 2", branch: "SRU (Özel Tim)" },
+            { badge: "LSPD-01", name: "Miller", password: "9900", rank: "Chief of Department", branch: "Müdüriyet Büro" }
+        ];
+
+        // Durum Yönetimi (State)
+        let loggedInOfficer = null;
+        let dutyActive = false;
+        let shiftStartTime = null;
+        let shiftTimerInterval = null;
+        let activeDatabaseTab = 'suspect';
+        let currentThreatCode = 'LSPD_CODE1';
+        let shifts = [];
+
+        // Devriye Sistem Değişkenleri
+        let activePatrols = [
+            {
+                id: "patrol_demo_1",
+                callsign: "A-1",
+                type: "Adam",
+                officers: [
+                    { name: "James Sterling", rank: "Lieutenant 1", badge: "LSPD-24" },
+                    { name: "Sarah Connor", rank: "Sergeant 2", badge: "LSPD-12" }
+                ],
+                startTime: new Date(Date.now() - 45 * 60 * 1000),
+                status: "LSPD_CODE1",
+                amiri: "James Sterling"
+            },
+            {
+                id: "patrol_demo_2",
+                callsign: "L-1",
+                type: "Lincoln",
+                officers: [
+                    { name: "John Doe", rank: "Officer 1", badge: "LSPD-109" }
+                ],
+                startTime: new Date(Date.now() - 15 * 60 * 1000),
+                status: "LSPD_CODE7",
+                amiri: "John Doe"
+            }
+        ];
+
+        window.onload = function() {
+            setInterval(updateClock, 1000);
+            setInterval(updatePatrolTimers, 1000);
+            updateClock();
+            logout();
+        };
+
+        function updateClock() {
+            const now = new Date();
+            const timeString = now.toTimeString().split(' ')[0];
+            const dateString = now.toLocaleDateString('tr-TR');
+            const liveClock = document.getElementById('live-time');
+            if (liveClock) {
+                liveClock.innerText = `${dateString} ${timeString}`;
+            }
+        }
+
+        // Custom Notification Handler
+        function showSysAlert(message) {
+            playSound('error');
+            document.getElementById('sys-alert-text').innerText = message;
+            document.getElementById('sys-alert-modal').classList.remove('hidden');
+        }
+
+        function closeSysAlert() {
+            playSound('click');
+            document.getElementById('sys-alert-modal').classList.add('hidden');
+        }
+
+        // Rütbe isminden ağırlık derecesini çeker
+        function getRankWeight(rankName) {
+            const r = RANKS.find(item => item.name.toLowerCase() === rankName.toLowerCase());
+            return r ? r.weight : 0;
+        }
+
+        // Düzenleme yetki kontrolü: Düzenleyen kişi Lieutenant+ olmalı ve hedef memurun rütbesi kendisinden kesinlikle düşük olmalı
+        function canManage(editorRank, targetRank) {
+            const editorWeight = getRankWeight(editorRank);
+            const targetWeight = getRankWeight(targetRank);
+            return editorWeight >= 12 && editorWeight > targetWeight;
+        }
+
+        // Bir devriyeyi yönetme yetkisi (Sadece birim amiri veya Kaptan ve üzeri rütbeliler)
+        function canManagePatrol(patrol) {
+            if (!loggedInOfficer) return false;
+            const isAmir = loggedInOfficer.name === patrol.amiri;
+            const isCaptainOrAbove = getRankWeight(loggedInOfficer.rank) >= 14;
+            return isAmir || isCaptainOrAbove;
+        }
+
+        function attemptLogin() {
+            const badgeInput = document.getElementById('login-badge').value.trim().toUpperCase();
+            const passInput = document.getElementById('login-password').value.trim();
+            const errorMsg = document.getElementById('login-error-msg');
+
+            const matched = officers.find(o => o.badge === badgeInput && o.password === passInput);
+
+            if (matched) {
+                playSound('beep');
+                loggedInOfficer = matched;
+                
+                // Dashboard bilgilerini doldur
+                document.getElementById('officer-name-display').innerText = matched.name;
+                document.getElementById('officer-badge-display').innerText = matched.badge;
+                document.getElementById('officer-rank-display').innerText = matched.rank;
+                document.getElementById('stat-branch').innerText = matched.branch;
+                
+                // Sağ Üst Rütbe Göstergesini Doldur
+                document.getElementById('header-rank-display').innerText = matched.rank;
+                
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('mdt-dashboard').classList.remove('hidden');
+                
+                switchMdtTab('duty');
+                resetDutyPanel();
+                renderActiveUnits();
+            } else {
+                playSound('error');
+                errorMsg.classList.remove('hidden');
+                setTimeout(() => {
+                    errorMsg.classList.add('hidden');
+                }, 4000);
+            }
+        }
+
+        function toggleRegisterForm(show) {
+            if (show) {
+                // Güvenlik doğrulama: Giriş yapılmış mı ve yetki derecesi yeterli mi?
+                if (!loggedInOfficer || getRankWeight(loggedInOfficer.rank) < 12) {
+                    showSysAlert("HATA: Yeni memur kaydetmek için en az Lieutenant 1 (Teğmen) yetkisine sahip olmalısınız!");
+                    return;
+                }
+            }
+            playSound('click');
+            const modal = document.getElementById('register-modal');
+            const resultBox = document.getElementById('reg-result');
+            const submitBtn = document.getElementById('reg-submit-btn');
+            
+            if (show) {
+                modal.classList.remove('hidden');
+                resultBox.classList.add('hidden');
+                submitBtn.classList.remove('hidden');
+                document.getElementById('reg-name').value = '';
+            } else {
+                modal.classList.add('hidden');
+            }
+        }
+
+        // Yeni Kayıt Olan Tüm Personeller Varsayılan Olarak CADET Rütbesinde Başlar
+        function createOfficer() {
+            // Teğmen veya üstü rütbe kontrolü
+            if (!loggedInOfficer || getRankWeight(loggedInOfficer.rank) < 12) {
+                showSysAlert("YETKİSİZ İŞLEM: Yeni kayıt işlemi engellendi!");
+                return;
+            }
+
+            const name = document.getElementById('reg-name').value.trim();
+            const branch = document.getElementById('reg-branch').value;
+            
+            if (!name) {
+                showSysAlert("HATA: Memurun adını girmelisiniz!");
+                return;
+            }
+
+            const randomBadgeNum = Math.floor(100 + Math.random() * 900);
+            const randomPass = Math.floor(1000 + Math.random() * 9000);
+            const newBadge = `LSPD-${randomBadgeNum}`;
+
+            const newOfficer = {
+                badge: newBadge,
+                name: name,
+                password: randomPass.toString(),
+                rank: "Cadet",
+                branch: branch
+            };
+
+            officers.push(newOfficer);
+            playSound('beep');
+
+            document.getElementById('res-badge').innerText = newBadge;
+            document.getElementById('res-pass').innerText = randomPass;
+            
+            document.getElementById('reg-result').classList.remove('hidden');
+            document.getElementById('reg-submit-btn').classList.add('hidden');
+
+            renderPersonnelList();
+        }
+
+        function logout() {
+            playSound('click');
+            if (dutyActive) {
+                endDuty();
+            }
+            loggedInOfficer = null;
+            document.getElementById('mdt-dashboard').classList.add('hidden');
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('login-badge').value = '';
+            document.getElementById('login-password').value = '';
+        }
+
+        function switchMdtTab(tabId) {
+            playSound('click');
+            
+            document.getElementById('mdt-tab-content-duty').classList.add('hidden');
+            document.getElementById('mdt-tab-content-personnel').classList.add('hidden');
+            document.getElementById('mdt-tab-content-database').classList.add('hidden');
+            document.getElementById('mdt-tab-content-announcements').classList.add('hidden');
+            document.getElementById('mdt-tab-content-patrols').classList.add('hidden');
+
+            document.querySelectorAll('.mdt-tab-btn').forEach(btn => {
+                btn.className = "mdt-tab-btn w-full px-4 py-3 rounded flex items-center gap-3 text-slate-400 hover:text-white hover:bg-slate-900/50 transition-all";
+            });
+
+            document.getElementById(`mdt-tab-content-${tabId}`).classList.remove('hidden');
+            
+            const activeBtn = document.getElementById(`tab-btn-${tabId}`);
+            activeBtn.className = "mdt-tab-btn w-full px-4 py-3 rounded flex items-center gap-3 bg-blue-950/40 text-cyan-300 border border-blue-900/50";
+            
+            if (tabId === 'patrols') {
+                loadPatrolOfficerChecklist();
+                renderActiveUnits();
+            } else if (tabId === 'personnel') {
+                renderPersonnelList();
+            }
+        }
+
+        // ================= MESAİ / DUTY METOTLARI =================
+        function resetDutyPanel() {
+            dutyActive = false;
+            clearInterval(shiftTimerInterval);
+            document.getElementById('badge-status-pill').innerText = "MESAIDE DEGIL (OFF-DUTY)";
+            document.getElementById('badge-status-pill').className = "bg-red-500/15 border border-red-500/30 text-red-400 text-xs font-mono font-bold px-3 py-1 rounded";
+            document.getElementById('officer-duty-dot').className = "absolute bottom-1 right-1 w-4 h-4 rounded-full bg-red-500 border-2 border-slate-950";
+            document.getElementById('live-shift-counter').innerText = "00:00:00";
+            document.getElementById('live-shift-counter').className = "text-3xl font-bold text-slate-500 font-mono tracking-widest mt-2";
+            
+            document.getElementById('start-duty-btn').classList.remove('hidden');
+            document.getElementById('end-duty-btn').classList.add('hidden');
+            
+            updateTotalDutyToday();
+        }
+
+        function startDuty() {
+            playSound('beep');
+            dutyActive = true;
+            shiftStartTime = new Date();
+            
+            document.getElementById('badge-status-pill').innerText = "MESAIDE (ON-DUTY)";
+            document.getElementById('badge-status-pill').className = "bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-mono font-bold px-3 py-1 rounded animate-pulse";
+            document.getElementById('officer-duty-dot').className = "absolute bottom-1 right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-slate-950 animate-pulse";
+            document.getElementById('live-shift-counter').className = "text-3xl font-bold text-emerald-400 font-mono tracking-widest mt-2 neon-glow";
+
+            document.getElementById('start-duty-btn').classList.add('hidden');
+            document.getElementById('end-duty-btn').classList.remove('hidden');
+
+            shiftTimerInterval = setInterval(updateShiftTimer, 1000);
+            renderActiveUnits();
+        }
+
+        function updateShiftTimer() {
+            if (!shiftStartTime) return;
+            const diff = new Date() - shiftStartTime;
+            document.getElementById('live-shift-counter').innerText = formatMilliseconds(diff);
+        }
+
+        function endDuty() {
+            if (!dutyActive || !shiftStartTime) return;
+            playSound('beep');
+            
+            const endTime = new Date();
+            const elapsedMs = endTime - shiftStartTime;
+            const durationStr = formatMilliseconds(elapsedMs);
+
+            const shiftLog = {
+                id: 'SHF-' + Math.floor(1000 + Math.random() * 9000),
+                start: shiftStartTime.toTimeString().split(' ')[0],
+                end: endTime.toTimeString().split(' ')[0],
+                durationMs: elapsedMs,
+                durationStr: durationStr
+            };
+
+            shifts.push(shiftLog);
+
+            document.getElementById('duty-reported-duration').innerText = durationStr;
+            document.getElementById('duty-result-modal').classList.remove('hidden');
+
+            renderShiftLogs();
+            resetDutyPanel();
+            renderActiveUnits();
+        }
+
+        function closeDutyReportModal() {
+            playSound('click');
+            document.getElementById('duty-result-modal').classList.add('hidden');
+        }
+
+        function formatMilliseconds(ms) {
+            let totalSeconds = Math.floor(ms / 1000);
+            let hours = Math.floor(totalSeconds / 3600);
+            let minutes = Math.floor((totalSeconds % 3600) / 60);
+            let seconds = totalSeconds % 60;
+
+            return [
+                hours.toString().padStart(2, '0'),
+                minutes.toString().padStart(2, '0'),
+                seconds.toString().padStart(2, '0')
+            ].join(':');
+        }
+
+        function updateTotalDutyToday() {
+            let totalMs = 0;
+            shifts.forEach(s => {
+                totalMs += s.durationMs;
+            });
+
+            let totalSeconds = Math.floor(totalMs / 1000);
+            let hours = Math.floor(totalSeconds / 3600);
+            let minutes = Math.floor((totalSeconds % 3600) / 60);
+
+            document.getElementById('total-shift-today').innerText = `${hours.toString().padStart(2, '0')} SAAT ${minutes.toString().padStart(2, '0')} DK`;
+            document.getElementById('stat-count').innerText = `${shifts.length} SEANS`;
+        }
+
+        function renderShiftLogs() {
+            const body = document.getElementById('shift-logs-body');
+            const emptyRow = document.getElementById('empty-shift-row');
+
+            if (shifts.length === 0) {
+                emptyRow.classList.remove('hidden');
+                body.querySelectorAll('.shift-row').forEach(row => row.remove());
+                return;
+            }
+
+            emptyRow.classList.add('hidden');
+            body.querySelectorAll('.shift-row').forEach(row => row.remove());
+
+            shifts.forEach(s => {
+                const tr = document.createElement('tr');
+                tr.className = "shift-row border-b border-slate-900 hover:bg-slate-900/30 transition-all";
+                tr.innerHTML = `
+                    <td class="p-3 text-cyan-400 font-bold">${s.id}</td>
+                    <td class="p-3">${s.start}</td>
+                    <td class="p-3">${s.end}</td>
+                    <td class="p-3 text-emerald-400 font-bold">${s.durationStr}</td>
+                    <td class="p-3"><span class="bg-emerald-950/40 text-emerald-400 px-2 py-0.5 border border-emerald-900/30 rounded text-[10px]">VERİ DEPOLANDI</span></td>
+                `;
+                body.appendChild(tr);
+            });
+        }
+
+        function clearShifts() {
+            playSound('click');
+            shifts = [];
+            renderShiftLogs();
+            updateTotalDutyToday();
+        }
+
+        // ================= PERSONEL SİCİLLERİ TABLO VE YÖNETİM METOTLARI =================
+        function renderPersonnelList() {
+            const body = document.getElementById('personnel-list-body');
+            const privilegeBadge = document.getElementById('management-privilege-badge');
+            const addBtn = document.getElementById('add-new-officer-btn');
+            if (!body) return;
+            body.innerHTML = '';
+
+            const editorWeight = getRankWeight(loggedInOfficer.rank);
+
+            // Başlık yetki göstergesi ve Yeni Memur Ekleme Butonu Görünürlüğü
+            if (editorWeight >= 12) {
+                privilegeBadge.innerText = `YÖNETİM YETKİSİ AKTİF (${loggedInOfficer.rank})`;
+                privilegeBadge.className = "text-xs bg-amber-950/40 text-amber-400 border border-amber-900/30 px-3 py-1 rounded font-bold";
+                if (addBtn) addBtn.classList.remove('hidden');
+            } else {
+                privilegeBadge.innerText = "YALNIZCA OKUMA ERİŞİMİ";
+                privilegeBadge.className = "text-xs bg-slate-900 text-slate-500 border border-slate-800 px-3 py-1 rounded font-bold";
+                if (addBtn) addBtn.classList.add('hidden');
+            }
+
+            // Memurları rütbe ağırlığına göre yüksekten düşüğe sırala
+            const sortedOfficers = [...officers].sort((a, b) => getRankWeight(b.rank) - getRankWeight(a.rank));
+
+            sortedOfficers.forEach(off => {
+                const tr = document.createElement('tr');
+                tr.className = "border-b border-[#1e293b] hover:bg-slate-900/30 transition-all text-slate-300";
+
+                const isEligible = canManage(loggedInOfficer.rank, off.rank);
+                
+                // Şifre maskeleme koruması: Sadece Lieutenant ve üstü şifreleri görebilir
+                const displayPassword = (editorWeight >= 12) ? off.password : "••••";
+
+                tr.innerHTML = `
+                    <td class="p-3 text-cyan-400 font-bold">${off.badge}</td>
+                    <td class="p-3 font-semibold text-white">${off.name}</td>
+                    <td class="p-3">
+                        <span class="bg-blue-950/40 text-blue-400 px-2 py-0.5 border border-blue-900/30 rounded text-[10px] font-bold uppercase">
+                            ${off.rank}
+                        </span>
+                    </td>
+                    <td class="p-3">${off.branch}</td>
+                    <td class="p-3 text-slate-500 tracking-widest">${displayPassword}</td>
+                    <td class="p-3 text-right">
+                        ${isEligible ? 
+                            `<button onclick="openEditOfficerModal('${off.badge}')" class="bg-amber-600/20 hover:bg-amber-600/40 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded transition text-[10px] font-bold">
+                                <i class="fa-solid fa-user-gear mr-1"></i> DÜZENLE
+                             </button>` 
+                            : `<span class="text-slate-600 text-[10px]">Erişim Yok</span>`
+                        }
+                    </td>
+                `;
+                body.appendChild(tr);
+            });
+        }
+
+        // Düzenleme Modalını Açma ve Yetkiye Göre Seçenekleri Belirleme
+        function openEditOfficerModal(badgeCode) {
+            playSound('click');
+            const target = officers.find(o => o.badge === badgeCode);
+            if (!target) return;
+
+            // Formu doldur
+            document.getElementById('edit-target-badge-hidden').value = badgeCode;
+            document.getElementById('edit-badge').value = target.badge;
+            document.getElementById('edit-name').value = target.name;
+            document.getElementById('edit-branch').value = target.branch;
+            document.getElementById('edit-password').value = target.password;
+
+            // Rütbe seçeneklerini doldur
+            const rankSelect = document.getElementById('edit-rank');
+            rankSelect.innerHTML = '';
+
+            const editorWeight = getRankWeight(loggedInOfficer.rank);
+
+            RANKS.forEach(rank => {
+                // Güvenlik kuralı: Yönetici sadece KENDİNDEN DAHA ALTAKİ rütbeleri atayabilir!
+                if (rank.weight < editorWeight) {
+                    const option = document.createElement('option');
+                    option.value = rank.name;
+                    option.text = rank.name;
+                    if (rank.name.toLowerCase() === target.rank.toLowerCase()) {
+                        option.selected = true;
+                    }
+                    rankSelect.appendChild(option);
+                }
+            });
+
+            document.getElementById('edit-officer-modal').classList.remove('hidden');
+        }
+
+        function closeEditOfficerModal() {
+            playSound('click');
+            document.getElementById('edit-officer-modal').classList.add('hidden');
+        }
+
+        // Güncellenen verileri kaydetme ve yerel verileri senkronize etme
+        function saveOfficerEdits() {
+            const oldBadge = document.getElementById('edit-target-badge-hidden').value;
+            const newBadge = document.getElementById('edit-badge').value.trim().toUpperCase();
+            const newName = document.getElementById('edit-name').value.trim();
+            const newBranch = document.getElementById('edit-branch').value.trim();
+            const newPassword = document.getElementById('edit-password').value.trim();
+            const newRank = document.getElementById('edit-rank').value;
+
+            if (!newBadge || !newName || !newBranch || !newPassword) {
+                showSysAlert("HATA: Tüm alanları doldurmanız gerekmektedir!");
+                return;
+            }
+
+            const idx = officers.findIndex(o => o.badge === oldBadge);
+            if (idx === -1) return;
+
+            // Arka plan hiyerarşi güvenlik doğrulaması
+            const targetOfficer = officers[idx];
+            if (!canManage(loggedInOfficer.rank, targetOfficer.rank)) {
+                showSysAlert("YETKİSİZ İŞLEM: Bu memurun verilerini değiştirmeye yetkiniz yok!");
+                closeEditOfficerModal();
+                return;
+            }
+
+            // Değişiklikleri uygula
+            officers[idx] = {
+                badge: newBadge,
+                name: newName,
+                branch: newBranch,
+                password: newPassword,
+                rank: newRank
+            };
+
+            playSound('beep');
+            closeEditOfficerModal();
+            renderPersonnelList();
+
+            // Eğer yönetici kendi bilgilerini düzenlediyse oturumu anlık güncelle
+            if (loggedInOfficer.badge === oldBadge) {
+                loggedInOfficer = officers[idx];
+                document.getElementById('officer-name-display').innerText = loggedInOfficer.name;
+                document.getElementById('officer-badge-display').innerText = loggedInOfficer.badge;
+                document.getElementById('officer-rank-display').innerText = loggedInOfficer.rank;
+                document.getElementById('stat-branch').innerText = loggedInOfficer.branch;
+                document.getElementById('header-rank-display').innerText = loggedInOfficer.rank;
+            }
+        }
+
+        // ================= VERİTABANI SORGULAMA METOTLARI =================
+        function setSearchFilter(type) {
+            playSound('click');
+            activeDatabaseTab = type;
+            
+            const btnSuspect = document.getElementById('filter-suspect');
+            const btnVehicle = document.getElementById('filter-vehicle');
+
+            if (type === 'suspect') {
+                btnSuspect.className = "flex-1 py-1 rounded text-center bg-cyan-950/40 text-cyan-400 border border-cyan-900/30";
+                btnVehicle.className = "flex-1 py-1 rounded text-center text-slate-400 hover:text-white";
+                document.getElementById('db-search-input').placeholder = "İsim (Örn: Trevor, Michael)...";
+            } else {
+                btnVehicle.className = "flex-1 py-1 rounded text-center bg-cyan-950/40 text-cyan-400 border border-cyan-900/30";
+                btnSuspect.className = "flex-1 py-1 rounded text-center text-slate-400 hover:text-white";
+                document.getElementById('db-search-input').placeholder = "Araç Plakası (Örn: 23ABC45, 99XRF01)...";
+            }
+        }
+
+        function searchDatabase() {
+            const query = document.getElementById('db-search-input').value.trim().toLowerCase();
+            const resultPanel = document.getElementById('search-result-panel');
+            const suspectDetail = document.getElementById('suspect-result-detail');
+            const vehicleDetail = document.getElementById('vehicle-result-detail');
+            const warningBadge = document.getElementById('result-warning-badge');
+
+            if (!query) {
+                showSysAlert("HATA: Sorgulama yapabilmek için veri girmeniz gerekmektedir!");
+                return;
+            }
+
+            playSound('beep');
+
+            if (activeDatabaseTab === 'suspect') {
+                const match = mockDatabase.suspects.find(s => s.name.toLowerCase().includes(query));
+                
+                if (match) {
+                    resultPanel.classList.remove('hidden');
+                    suspectDetail.classList.remove('hidden');
+                    vehicleDetail.classList.add('hidden');
+
+                    document.getElementById('result-title').innerText = `KİMLİK SORGUSU: ${match.name.toUpperCase()}`;
+                    document.getElementById('susp-name').innerText = match.name;
+                    document.getElementById('susp-age').innerText = match.age;
+                    document.getElementById('susp-license').innerText = match.license;
+                    document.getElementById('susp-wanted-level').innerText = match.wantedLevel;
+                    document.getElementById('susp-records').innerText = match.records;
+
+                    if (match.wantedLevel.includes("ARANMIYOR") || match.wantedLevel.includes("TEMİZ")) {
+                        warningBadge.innerText = "SİCİL TEMİZ";
+                        warningBadge.className = "text-xs bg-emerald-950/30 border border-emerald-900/30 text-emerald-400 px-3 py-1 rounded font-mono font-bold";
+                    } else {
+                        warningBadge.innerText = "ARANIYOR (WANTED)";
+                        warningBadge.className = "text-xs bg-red-950/30 border border-red-900/30 text-red-500 px-3 py-1 rounded font-mono font-bold animate-pulse";
+                    }
+                } else {
+                    showNotFound();
+                }
+            } else {
+                const match = mockDatabase.vehicles.find(v => v.plate.toLowerCase().includes(query));
+                
+                if (match) {
+                    resultPanel.classList.remove('hidden');
+                    vehicleDetail.classList.remove('hidden');
+                    suspectDetail.classList.add('hidden');
+
+                    document.getElementById('result-title').innerText = `PLAKA SORGUSU: ${match.plate.toUpperCase()}`;
+                    document.getElementById('veh-model').innerText = match.model;
+                    document.getElementById('veh-plate').innerText = match.plate;
+                    document.getElementById('veh-owner').innerText = match.owner;
+                    document.getElementById('veh-insurance').innerText = match.insurance;
+                    document.getElementById('veh-status').innerText = match.status;
+
+                    if (match.status.includes("ARANMASI YOK")) {
+                        warningBadge.innerText = "ARANMA YOK";
+                        warningBadge.className = "text-xs bg-emerald-950/30 border border-emerald-900/30 text-emerald-400 px-3 py-1 rounded font-mono font-bold";
+                    } else {
+                        warningBadge.innerText = "ŞÜPHELİ / ÇALINTI";
+                        warningBadge.className = "text-xs bg-red-950/30 border border-red-900/30 text-red-500 px-3 py-1 rounded font-mono font-bold animate-pulse";
+                    }
+                } else {
+                    showNotFound();
+                }
+            }
+        }
+
+        function showNotFound() {
+            playSound('error');
+            const resultPanel = document.getElementById('search-result-panel');
+            const suspectDetail = document.getElementById('suspect-result-detail');
+            const vehicleDetail = document.getElementById('vehicle-result-detail');
+            const warningBadge = document.getElementById('result-warning-badge');
+
+            resultPanel.classList.remove('hidden');
+            suspectDetail.classList.add('hidden');
+            vehicleDetail.classList.add('hidden');
+            
+            document.getElementById('result-title').innerText = "VERI BULUNAMADI";
+            warningBadge.innerText = "GEÇERSİZ SORGULAMA";
+            warningBadge.className = "text-xs bg-slate-900 text-slate-500 border border-slate-800 px-3 py-1 rounded font-mono font-bold";
+            
+            resultPanel.innerHTML = `
+                <div class="text-center py-8 font-mono space-y-2">
+                    <p class="text-red-500 text-sm font-bold"><i class="fa-solid fa-triangle-exclamation"></i> FEDERAL VERİTABANI EŞLEŞMESİ BULUNAMADI!</p>
+                    <p class="text-xs text-slate-500">Girdiğiniz parametrelere ait bir eşleşme saptanamadı. Harf kontrolü yapıp tekrar sorgulayın.</p>
+                    <button onclick="resetDbSearchPanel()" class="mt-4 bg-slate-950 border border-slate-800 hover:border-slate-700 px-4 py-1.5 rounded text-xs text-slate-300">Yeni Sorgu</button>
+                </div>
+            `;
+        }
+
+        function resetDbSearchPanel() {
+            playSound('click');
+            const panel = document.getElementById('search-result-panel');
+            panel.classList.add('hidden');
+            panel.innerHTML = `
+                <div class="flex justify-between items-center border-b border-slate-900 pb-3">
+                    <h4 class="font-bold text-white text-base font-mono uppercase tracking-wider text-cyan-400" id="result-title">SORGULAMA SONUCU</h4>
+                    <span class="text-xs bg-red-950/30 border border-red-900/30 text-red-500 px-3 py-1 rounded font-mono font-bold animate-pulse" id="result-warning-badge">ARANIYOR (WANTED)</span>
+                </div>
+                <div id="suspect-result-detail" class="grid grid-cols-1 md:grid-cols-12 gap-6 hidden">
+                    <div class="md:col-span-3 flex justify-center">
+                        <div class="w-full max-w-[200px] aspect-square bg-slate-950 border border-slate-800 rounded-lg flex flex-col justify-center items-center text-slate-600 relative overflow-hidden">
+                            <i class="fa-solid fa-user text-8xl"></i>
+                            <div class="absolute bottom-0 inset-x-0 bg-slate-900/80 py-1.5 text-center text-[10px] text-slate-400">MOCK_DNA_MATCHED</div>
+                        </div>
+                    </div>
+                    <div class="md:col-span-9 space-y-4 font-mono text-xs">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                <p class="text-slate-500">İSİM SOYİSİM</p>
+                                <p class="text-sm font-bold text-white" id="susp-name">-</p>
+                            </div>
+                            <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                <p class="text-slate-500">CİNSİYET & YAŞ</p>
+                                <p class="text-sm font-bold text-white" id="susp-age">-</p>
+                            </div>
+                            <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                <p class="text-slate-500">EHLİYET DURUMU</p>
+                                <p class="text-sm font-bold text-emerald-400" id="susp-license">VAR / AKTİF</p>
+                            </div>
+                            <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                <p class="text-slate-500">MEVCUT ARANMA DERECESİ</p>
+                                <p class="text-sm font-bold text-red-500 animate-pulse" id="susp-wanted-level">-</p>
+                            </div>
+                        </div>
+                        <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                            <p class="text-slate-500 mb-1">GEÇMİŞ SUÇ KAYITLARI & ADLİ SİCİL</p>
+                            <p class="text-slate-300 leading-relaxed text-xs" id="susp-records">Geçmiş suç kaydı temiz.</p>
+                        </div>
+                    </div>
+                </div>
+                <div id="vehicle-result-detail" class="grid grid-cols-1 md:grid-cols-12 gap-6 hidden">
+                    <div class="md:col-span-3 flex justify-center">
+                        <div class="w-full max-w-[200px] aspect-square bg-slate-950 border border-slate-800 rounded-lg flex flex-col justify-center items-center text-slate-600 relative overflow-hidden">
+                            <i class="fa-solid fa-car text-8xl"></i>
+                            <div class="absolute bottom-0 inset-x-0 bg-slate-900/80 py-1.5 text-center text-[10px] text-slate-400">PLATE_VERIFIED</div>
+                        </div>
+                    </div>
+                    <div class="md:col-span-9 space-y-4 font-mono text-xs">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                <p class="text-slate-500">ARAÇ MARKASI & MODELİ</p>
+                                <p class="text-sm font-bold text-white" id="veh-model">-</p>
+                            </div>
+                            <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                <p class="text-slate-500">PLAKA NUMARASI</p>
+                                <p class="text-sm font-bold text-white text-cyan-400" id="veh-plate">-</p>
+                            </div>
+                            <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                <p class="text-slate-500">RUHSAT SAHİBİ</p>
+                                <p class="text-sm font-bold text-white" id="veh-owner">-</p>
+                            </div>
+                            <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                                <p class="text-slate-500">SİGORTA DURUMU</p>
+                                <p class="text-sm font-bold text-emerald-400" id="veh-insurance">-</p>
+                            </div>
+                        </div>
+                        <div class="bg-slate-950 p-3 rounded border border-slate-900">
+                            <p class="text-slate-500">BİLDİRİLEN ARANMA NOTU / DURUMU</p>
+                            <p class="text-slate-300 font-bold" id="veh-status">-</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('db-search-input').value = '';
+        }
+
+        // ================= ALARM VE DEVRIYE PANELI KONTROLLERİ =================
+        function changeThreatLevel(code) {
+            playSound('siren');
+            currentThreatCode = code;
+            
+            // Giriş yapan memurun dahil olduğu bir devriye var mı kontrol et
+            if (loggedInOfficer) {
+                const myPatrol = activePatrols.find(p => p.officers.some(o => o.badge === loggedInOfficer.badge));
+                if (myPatrol) {
+                    myPatrol.status = code;
+                    renderActiveUnits();
+                }
+            }
+
+            const levelText = document.getElementById('threat-level');
+            
+            if (code === 'LSPD_CODE1') {
+                levelText.innerText = "CODE 1 (AKTİF)";
+                levelText.className = "text-emerald-500 font-bold";
+            } else if (code === 'LSPD_CODE2') {
+                levelText.innerText = "CODE 2 (AKTİF)";
+                levelText.className = "text-amber-500 font-bold";
+            } else if (code === 'LSPD_CODE3') {
+                levelText.innerText = "KOD 3 (ACİL DURUM)";
+                levelText.className = "text-red-500 font-bold animate-pulse";
+            } else if (code === 'LSPD_CODE7') {
+                levelText.innerText = "KOD-7 (MEŞGUL)";
+                levelText.className = "text-indigo-400 font-bold";
+            } else if (code === 'LSPD_DEPT') {
+                levelText.innerText = "DEPARTMANDA";
+                levelText.className = "text-blue-400 font-bold";
+            } else if (code === 'LSPD_YEMEK') {
+                levelText.innerText = "YEMEK MOLASI";
+                levelText.className = "text-orange-400 font-bold animate-pulse";
+            } else if (code === 'LSPD_1009') {
+                levelText.innerText = "10-09 (TELSİZ SORGUSU)";
+                levelText.className = "text-purple-400 font-bold";
+            } else if (code === 'LSPD_SUSPECT') {
+                levelText.innerText = "ŞÜPHELİ İŞLEMLERİ";
+                levelText.className = "text-rose-400 font-bold animate-pulse";
+            }
+        }
+
+        // Memur Seçim Listesini Doldurma
+        function loadPatrolOfficerChecklist() {
+            const checklistContainer = document.getElementById('patrol-officers-checklist');
+            if (!checklistContainer) return;
+            checklistContainer.innerHTML = '';
+
+            // Tüm memurları rütbe ağırlığına göre listele
+            const sorted = [...officers].sort((a, b) => getRankWeight(b.rank) - getRankWeight(a.rank));
+
+            sorted.forEach(off => {
+                const div = document.createElement('div');
+                div.className = "flex items-center gap-2 hover:bg-slate-900/60 p-1.5 rounded transition-all";
+                
+                // Devriyede olup olmadığını kontrol et
+                const inPatrol = activePatrols.some(p => p.officers.some(o => o.badge === off.badge));
+                const checkedAttr = (loggedInOfficer && loggedInOfficer.badge === off.badge) ? 'checked' : '';
+                const disabledAttr = inPatrol ? 'disabled title="Zaten başka bir devriyede!"' : '';
+
+                div.innerHTML = `
+                    <input type="checkbox" id="patrol-chk-${off.badge}" value="${off.badge}" ${checkedAttr} ${disabledAttr} class="rounded text-cyan-600 bg-slate-900 border-slate-800 focus:ring-cyan-500">
+                    <label for="patrol-chk-${off.badge}" class="flex justify-between w-full cursor-pointer select-none text-[11px] ${inPatrol ? 'text-slate-600' : 'text-slate-300'}">
+                        <span>${off.name} (${off.badge})</span>
+                        <span class="text-slate-500 uppercase text-[9px] font-bold">${off.rank} ${inPatrol ? '[GÖREVDE]' : ''}</span>
+                    </label>
+                `;
+                checklistContainer.appendChild(div);
+            });
+        }
+
+        // Otomatik Devriye Sınıfı/Tipi Düzenleme (E ve H Hariç)
+        function adjustPatrolType(patrol) {
+            if (patrol.type === 'Edward' || patrol.type === 'Hudson') {
+                // E ve H tipleri muaf tutulmuştur
+                return;
+            }
+            const count = patrol.officers.length;
+            let newType = patrol.type;
+            let prefix = 'L';
+
+            if (count === 1) {
+                newType = 'Lincoln';
+                prefix = 'L';
+            } else if (count === 2) {
+                newType = 'Adam';
+                prefix = 'A';
+            } else if (count === 3) {
+                newType = 'David';
+                prefix = 'D';
+            } else if (count >= 4) {
+                newType = 'Charles';
+                prefix = 'C';
+            }
+
+            if (newType !== patrol.type) {
+                patrol.type = newType;
+                // Değişen tipe göre yeni bir boştaki çağrı kodunu atayalım
+                let numSuffix = 1;
+                while (activePatrols.some(p => p.id !== patrol.id && p.callsign === `${prefix}-${numSuffix}`)) {
+                    numSuffix++;
+                }
+                patrol.callsign = `${prefix}-${numSuffix}`;
+            }
+        }
+
+        // Yeni Devriye Oluşturma Mantığı & Kurallar
+        function createNewPatrol() {
+            const errorDiv = document.getElementById('patrol-error');
+            const errorText = document.getElementById('patrol-error-text');
+            errorDiv.classList.add('hidden');
+
+            const selectedBadges = Array.from(document.querySelectorAll('#patrol-officers-checklist input[type="checkbox"]:checked'))
+                .map(chk => chk.value);
+
+            if (selectedBadges.length === 0) {
+                showSysAlert("HATA: Devriye başlatabilmek için en az bir memur seçmelisiniz!");
+                return;
+            }
+
+            // GÜVENLİK YETKİ KONTROLÜ: Kaptan ve üstü haricindekiler kendisinin olmadığı devriye açamaz
+            const loggedInWeight = getRankWeight(loggedInOfficer.rank);
+            if (loggedInWeight < 14) {
+                if (!selectedBadges.includes(loggedInOfficer.badge)) {
+                    showSysAlert("GÜVENLİK PROTOKOLÜ: Kaptan (Captain 1) ve üzeri rütbeliler haricindeki personel, kendisinin yer almadığı bir devriye birimi oluşturamaz!");
+                    return;
+                }
+            }
+
+            // GÜVENLİK KONTROLÜ: Seçilen memurlardan biri bile zaten aktif devriyedeyse yeni bir devriye açmasın!
+            const alreadyInPatrol = selectedBadges.some(badge => {
+                return activePatrols.some(p => p.officers.some(o => o.badge === badge));
+            });
+
+            if (alreadyInPatrol) {
+                showSysAlert("PROTOKOL İHLALİ: Seçilen personellerden biri zaten aktif bir devriyede yer alıyor! (Şu anda başka bir devriye biriminiz var)");
+                return;
+            }
+
+            const pType = document.getElementById('patrol-type-select').value;
+            const count = selectedBadges.length;
+
+            // Devriye Sınırları & Kuralları
+            let min = 1, max = 1;
+            let callsignPrefix = "L";
+
+            if (pType === 'Lincoln') { min = 1; max = 1; callsignPrefix = "L"; }
+            else if (pType === 'Adam') { min = 2; max = 2; callsignPrefix = "A"; }
+            else if (pType === 'David') { min = 3; max = 3; callsignPrefix = "D"; }
+            else if (pType === 'Charles') { min = 4; max = 4; callsignPrefix = "C"; }
+            else if (pType === 'Edward') { min = 1; max = 3; callsignPrefix = "E"; }
+            else if (pType === 'Mary') { min = 1; max = 1; callsignPrefix = "M"; }
+            else if (pType === 'Hudson') { min = 1; max = 2; callsignPrefix = "H"; }
+
+            if (count < min) {
+                showSysAlert(`HATA: ${pType} birimi için seçilen memur sayısı yetersiz! (Gereken en az: ${min} kişi, Seçilen: ${count} kişi)`);
+                return;
+            }
+            if (count > max) {
+                showSysAlert(`HATA: ${pType} birimi için sınır aşıldı! (En fazla: ${max} kişi, Seçilen: ${count} kişi)`);
+                return;
+            }
+
+            // Seçilen memurların detaylı listesini oluştur
+            const selectedOfficersDetails = selectedBadges.map(badge => {
+                const found = officers.find(o => o.badge === badge);
+                return { name: found.name, badge: found.badge, rank: found.rank };
+            });
+
+            // Birim Amirini Seç (Rütbesi En Yüksek Olan)
+            selectedOfficersDetails.sort((a, b) => getRankWeight(b.rank) - getRankWeight(a.rank));
+            const amirName = selectedOfficersDetails[0].name;
+
+            // Sıradaki Müsait Çağrı Kodunu Bul (A-1, A-2 vb.)
+            let numSuffix = 1;
+            while (activePatrols.some(p => p.callsign === `${callsignPrefix}-${numSuffix}`)) {
+                numSuffix++;
+            }
+            const finalCallsign = `${callsignPrefix}-${numSuffix}`;
+
+            // Yeni Devriyeyi Ekle
+            const newP = {
+                id: 'patrol_' + Date.now(),
+                callsign: finalCallsign,
+                type: pType,
+                officers: selectedOfficersDetails,
+                startTime: new Date(),
+                status: "LSPD_CODE1",
+                amiri: amirName
+            };
+
+            activePatrols.push(newP);
+            playSound('beep');
+
+            if (selectedBadges.includes(loggedInOfficer.badge)) {
+                changeThreatLevel("LSPD_CODE1");
+            }
+
+            renderActiveUnits();
+            loadPatrolOfficerChecklist();
+        }
+
+        // Devriyeyi Dağıtma (Disband)
+        function disbandPatrol(patrolId) {
+            playSound('click');
+            const patrol = activePatrols.find(p => p.id === patrolId);
+            if (!patrol) return;
+
+            // Yetki kontrolü: Sadece amir veya Captain+ dağıtabilir
+            if (!canManagePatrol(patrol)) {
+                showSysAlert("YETKİSİZ İŞLEM: Sadece bu devriyenin amiri veya bir Kaptan (Captain 1+) devriyeyi dağıtabilir!");
+                return;
+            }
+
+            activePatrols = activePatrols.filter(p => p.id !== patrolId);
+            
+            // Eğer giriş yapan memurun devriyesi dağıtıldıysa durumunu sıfırla
+            if (loggedInOfficer) {
+                const stillInPatrol = activePatrols.some(p => p.officers.some(o => o.badge === loggedInOfficer.badge));
+                if (!stillInPatrol) {
+                    document.getElementById('threat-level').innerText = "DEVRIYEDE DEGIL";
+                    document.getElementById('threat-level').className = "text-slate-500 font-bold";
+                }
+            }
+
+            renderActiveUnits();
+            loadPatrolOfficerChecklist();
+        }
+
+        // Manuel Durum Değiştirme (Devriye Kartı üzerinden)
+        function changePatrolStatusInline(patrolId, newStatus) {
+            const p = activePatrols.find(pat => pat.id === patrolId);
+            if (p) {
+                // Yetki kontrolü: Sadece amir veya Captain+ düzenleyebilir
+                if (!canManagePatrol(p)) {
+                    showSysAlert("YETKİSİZ İŞLEM: Devriye durumunu sadece o devriyenin amiri veya bir Kaptan değiştirebilir!");
+                    renderActiveUnits(); // Yenile
+                    return;
+                }
+
+                p.status = newStatus;
+                playSound('beep');
+                renderActiveUnits();
+
+                // Eğer aktif giriş yapan memur bu devriyedeyse sol paneli de güncelle
+                if (loggedInOfficer && p.officers.some(o => o.badge === loggedInOfficer.badge)) {
+                    changeThreatLevel(newStatus);
+                }
+            }
+        }
+
+        // Sürelerin canlı olarak saniyede bir güncellenmesi
+        function updatePatrolTimers() {
+            activePatrols.forEach(p => {
+                const elapsedSpan = document.getElementById(`elapsed-${p.id}`);
+                if (elapsedSpan) {
+                    const diff = new Date() - new Date(p.startTime);
+                    elapsedSpan.innerText = formatMilliseconds(diff);
+                }
+            });
+        }
+
+        // Durum kodu için CSS sınıfları ve Türkçeleştirme kelimeleri
+        function getStatusDetails(status) {
+            switch (status) {
+                case 'LSPD_CODE1': return { text: 'CODE 1 (AKTİF)', color: 'emerald' };
+                case 'LSPD_CODE2': return { text: 'CODE 2 (AKTİF)', color: 'amber' };
+                case 'LSPD_CODE3': return { text: 'ACİL DURUM (KOD 3)', color: 'red' };
+                case 'LSPD_CODE7': return { text: 'KOD-7 (MEŞGUL)', color: 'indigo' };
+                case 'LSPD_DEPT': return { text: 'DEPARTMANDA', color: 'blue' };
+                case 'LSPD_YEMEK': return { text: 'YEMEK MOLASI', color: 'orange' };
+                case 'LSPD_1009': return { text: '10-09 (TELSİZ SORGUSU)', color: 'purple' };
+                case 'LSPD_SUSPECT': return { text: 'ŞÜPHELİ İŞLEMLERİ', color: 'rose' };
+                default: return { text: 'BİLİNMİYOR', color: 'slate' };
+            }
+        }
+
+        function renderActiveUnits() {
+            const listContainer = document.getElementById('active-units-list');
+            if (!listContainer) return;
+            listContainer.innerHTML = '';
+
+            if (activePatrols.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="text-center py-10 text-slate-500 border border-dashed border-slate-900 rounded-lg">
+                        <i class="fa-solid fa-satellite-dish text-3xl mb-2 text-slate-600"></i>
+                        <p>Aktif durumda hiçbir devriye birimi bulunmuyor.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            activePatrols.forEach(p => {
+                const statusInfo = getStatusDetails(p.status);
+                const diff = new Date() - new Date(p.startTime);
+                const initialDuration = formatMilliseconds(diff);
+
+                const card = document.createElement('div');
+                card.className = `bg-slate-950 p-4 rounded-xl border border-slate-900 flex flex-col md:flex-row justify-between gap-4 transition-all hover:border-slate-800`;
+                
+                // Memurların isimleri ve rütbe rozetleri HTML'i
+                let officersHtml = '';
+                p.officers.forEach(off => {
+                    const isAmir = off.name === p.amiri;
+                    officersHtml += `
+                        <div onclick="openMemberActionModal('${p.id}', '${off.badge}', '${off.name}', '${off.rank}')" class="flex items-center justify-between bg-slate-900/60 p-2 border border-slate-800/40 rounded cursor-pointer hover:border-cyan-500/50 transition-all" title="Birim İşlemleri">
+                            <div>
+                                <span class="text-white font-semibold block">${off.name} (${off.badge})</span>
+                                <span class="text-[9px] text-slate-500 uppercase font-bold">${off.rank}</span>
+                            </div>
+                            ${isAmir ? `<span class="bg-amber-950/40 text-amber-400 text-[8px] font-bold px-1.5 py-0.5 rounded border border-amber-900/30 shrink-0">BİRİM AMİRİ</span>` : ''}
+                        </div>
+                    `;
+                });
+
+                // Yetki kontrolü: Sadece amir veya Kaptan+ kart kontrollerini kullanabilir
+                const isManager = loggedInOfficer && (loggedInOfficer.name === p.amiri || getRankWeight(loggedInOfficer.rank) >= 14);
+
+                card.innerHTML = `
+                    <div class="space-y-3 flex-1">
+                        <!-- Üst Kısım: Callsign & Zaman -->
+                        <div class="flex items-center justify-between gap-3">
+                            <div class="flex items-center gap-3">
+                                <span class="bg-cyan-950/50 text-cyan-400 border border-cyan-800/40 text-sm font-black px-3 py-1 rounded tracking-wide">
+                                    ${p.callsign.toUpperCase()} (${p.type.toUpperCase()})
+                                </span>
+                                <div class="text-[10px] text-slate-500 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-clock text-slate-600 animate-pulse"></i> 
+                                    <span id="elapsed-${p.id}" class="text-cyan-500 font-bold">${initialDuration}</span> süredir aktif
+                                </div>
+                            </div>
+                            
+                            <!-- Üye Ekle Butonu (Sadece Yetkililere Görünür) -->
+                            ${isManager ? `
+                                <button onclick="openAddMemberModal('${p.id}')" class="bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/30 text-emerald-400 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1">
+                                    <i class="fa-solid fa-plus"></i> ÜYE EKLE
+                                </button>
+                            ` : ''}
+                        </div>
+
+                        <!-- Memurlar Listesi -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            ${officersHtml}
+                        </div>
+                    </div>
+
+                    <!-- Sağ Taraf: Durum Ataması & Dağıtma -->
+                    <div class="flex flex-col justify-between items-end gap-3 shrink-0">
+                        <!-- Durum Göstergesi -->
+                        <span class="bg-${statusInfo.color}-950/40 text-${statusInfo.color}-400 px-2.5 py-1 border border-${statusInfo.color}-900/30 rounded text-[10px] font-extrabold uppercase tracking-wider animate-pulse">
+                            ${statusInfo.text}
+                        </span>
+
+                        <!-- Durum Değiştirici Hızlı Select -->
+                        <div class="flex gap-2">
+                            <select onchange="changePatrolStatusInline('${p.id}', this.value)" ${!isManager ? 'disabled' : ''} class="bg-slate-900 border border-slate-800 text-[10px] text-slate-300 p-1.5 rounded focus:outline-none focus:border-cyan-500 disabled:opacity-50">
+                                <option value="LSPD_CODE1" ${p.status === 'LSPD_CODE1' ? 'selected' : ''}>KOD 1</option>
+                                <option value="LSPD_CODE2" ${p.status === 'LSPD_CODE2' ? 'selected' : ''}>KOD 2</option>
+                                <option value="LSPD_CODE3" ${p.status === 'LSPD_CODE3' ? 'selected' : ''}>KOD 3</option>
+                                <option value="LSPD_CODE7" ${p.status === 'LSPD_CODE7' ? 'selected' : ''}>KOD-7</option>
+                                <option value="LSPD_DEPT" ${p.status === 'LSPD_DEPT' ? 'selected' : ''}>DEPARTMANDA</option>
+                                <option value="LSPD_YEMEK" ${p.status === 'LSPD_YEMEK' ? 'selected' : ''}>YEMEK MOLASI</option>
+                                <option value="LSPD_1009" ${p.status === 'LSPD_1009' ? 'selected' : ''}>10-09</option>
+                                <option value="LSPD_SUSPECT" ${p.status === 'LSPD_SUSPECT' ? 'selected' : ''}>ŞÜPHELİ İŞLEMLERİ</option>
+                            </select>
+
+                            ${isManager ? `
+                                <button onclick="disbandPatrol('${p.id}')" class="bg-red-950/40 hover:bg-red-900/40 text-red-400 border border-red-900/30 p-1.5 rounded transition text-[10px] font-bold" title="Devriyeyi Dağıt">
+                                    <i class="fa-solid fa-rectangle-xmark"></i> DAĞIT
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+                listContainer.appendChild(card);
+            });
+        }
+
+        // ================= BİRİM ÜYESİ ETKİLEŞİM İŞLEMLERİ =================
+        function openMemberActionModal(patrolId, badge, name, rank) {
+            playSound('click');
+            const patrol = activePatrols.find(p => p.id === patrolId);
+            if (!patrol) return;
+
+            // Yetki kontrolü: Sadece bu devriyenin amiri veya Kaptan+ işlemleri yürütebilir
+            const isAmir = loggedInOfficer && loggedInOfficer.name === patrol.amiri;
+            const isCaptain = loggedInOfficer && getRankWeight(loggedInOfficer.rank) >= 14;
+
+            if (!isAmir && !isCaptain) {
+                showSysAlert("YETKİSİZ İŞLEM: Sadece bu devriyenin amiri (Devriye Amiri) veya bir Kaptan (Captain 1+) üyeleri düzenleyebilir!");
+                return;
+            }
+
+            document.getElementById('action-patrol-id').value = patrolId;
+            document.getElementById('action-officer-badge').value = badge;
+            document.getElementById('member-action-title').innerText = `${name} (${badge})`;
+            document.getElementById('member-action-subtitle').innerText = `${rank} - Birim İşlemleri`;
+            document.getElementById('member-action-modal').classList.remove('hidden');
+        }
+
+        function closeMemberActionModal() {
+            playSound('click');
+            document.getElementById('member-action-modal').classList.add('hidden');
+        }
+
+        // Seçilen Kişiyi Birim Amiri Yapma
+        function makeUnitCommander() {
+            const patrolId = document.getElementById('action-patrol-id').value;
+            const badge = document.getElementById('action-officer-badge').value;
+            const patrol = activePatrols.find(p => p.id === patrolId);
+            
+            if (patrol) {
+                // Sadece mevcut devriye amiri veya Kaptan+ bu yetkiyi devredebilir
+                const isAmir = loggedInOfficer && loggedInOfficer.name === patrol.amiri;
+                const isCaptain = loggedInOfficer && getRankWeight(loggedInOfficer.rank) >= 14;
+
+                if (!isAmir && !isCaptain) {
+                    showSysAlert("YETKİSİZ İŞLEM: Sadece mevcut Devriye Amiri amirliği bir başkasına devredebilir!");
+                    closeMemberActionModal();
+                    return;
+                }
+
+                const officer = patrol.officers.find(o => o.badge === badge);
+                if (officer) {
+                    patrol.amiri = officer.name;
+                    playSound('beep');
+                    renderActiveUnits();
+                }
+            }
+            closeMemberActionModal();
+        }
+
+        // Seçilen Kişiyi Birimden Atma
+        function kickFromUnit() {
+            const patrolId = document.getElementById('action-patrol-id').value;
+            const badge = document.getElementById('action-officer-badge').value;
+            const patrol = activePatrols.find(p => p.id === patrolId);
+            
+            if (patrol) {
+                // Sadece mevcut devriye amiri veya Kaptan+ adam eksiltebilir
+                const isAmir = loggedInOfficer && loggedInOfficer.name === patrol.amiri;
+                const isCaptain = loggedInOfficer && getRankWeight(loggedInOfficer.rank) >= 14;
+
+                if (!isAmir && !isCaptain) {
+                    showSysAlert("YETKİSİZ İŞLEM: Sadece mevcut Devriye Amiri veya Kaptan birimden üye çıkartabilir!");
+                    closeMemberActionModal();
+                    return;
+                }
+
+                const targetedOfficer = patrol.officers.find(o => o.badge === badge);
+                
+                // Memuru devriye kadrosundan çıkar
+                patrol.officers = patrol.officers.filter(o => o.badge !== badge);
+                
+                // Eğer devriyede hiç üye kalmadıysa birimi tamamen kaldır
+                if (patrol.officers.length === 0) {
+                    activePatrols = activePatrols.filter(p => p.id !== patrolId);
+                } else {
+                    // Eğer birimden atılan kişi amirse, kalan üyelerden en yüksek rütbeliyi otomatik amir ata
+                    if (targetedOfficer && targetedOfficer.name === patrol.amiri) {
+                        const sorted = [...patrol.officers].sort((a, b) => getRankWeight(b.rank) - getRankWeight(a.rank));
+                        patrol.amiri = sorted[0].name;
+                    }
+                    
+                    // Boyutu otomatik olarak yeniden düzenle (E ve H hariç)
+                    adjustPatrolType(patrol);
+                    playSound('beep');
+                }
+                
+                // Eğer kendimizi birimden attıysak durumumuzu sol panelde sıfırlayalım
+                if (loggedInOfficer && badge === loggedInOfficer.badge) {
+                    document.getElementById('threat-level').innerText = "DEVRIYEDE DEGIL";
+                    document.getElementById('threat-level').className = "text-slate-500 font-bold";
+                }
+
+                renderActiveUnits();
+            }
+            closeMemberActionModal();
+            loadPatrolOfficerChecklist();
+        }
+
+        // ================= YENİ ÜYE EKLEME FONKSİYONLARI =================
+        function openAddMemberModal(patrolId) {
+            playSound('click');
+            const patrol = activePatrols.find(p => p.id === patrolId);
+            if (!patrol) return;
+
+            // Yetki kontrolü: Sadece devriye amiri veya Kaptan+ ekleyebilir
+            if (!canManagePatrol(patrol)) {
+                showSysAlert("YETKİSİZ İŞLEM: Sadece bu devriyenin amiri veya bir Kaptan devriyeye yeni üye ekleyebilir!");
+                return;
+            }
+
+            document.getElementById('add-member-patrol-id').value = patrolId;
+            const select = document.getElementById('add-member-select');
+            select.innerHTML = '';
+
+            // Sadece başka hiçbir devriyede bulunmayan boştaki memurları getir
+            const freeOfficers = officers.filter(off => {
+                return !activePatrols.some(p => p.officers.some(o => o.badge === off.badge));
+            });
+
+            if (freeOfficers.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.text = 'Müsait memur bulunmamaktadır!';
+                select.appendChild(opt);
+            } else {
+                freeOfficers.forEach(off => {
+                    const opt = document.createElement('option');
+                    opt.value = off.badge;
+                    opt.text = `${off.name} (${off.badge}) - ${off.rank}`;
+                    select.appendChild(opt);
+                });
+            }
+
+            document.getElementById('add-member-modal').classList.remove('hidden');
+        }
+
+        function closeAddMemberModal() {
+            playSound('click');
+            document.getElementById('add-member-modal').classList.add('hidden');
+        }
+
+        function submitAddMember() {
+            const patrolId = document.getElementById('add-member-patrol-id').value;
+            const badge = document.getElementById('add-member-select').value;
+            if (!badge) {
+                playSound('error');
+                return;
+            }
+
+            const patrol = activePatrols.find(p => p.id === patrolId);
+            const officer = officers.find(o => o.badge === badge);
+
+            if (patrol && officer) {
+                // Memuru ekle
+                patrol.officers.push({
+                    name: officer.name,
+                    badge: officer.badge,
+                    rank: officer.rank
+                });
+
+                // Devriye boyut ve tipini otomatik düzenle (E ve H hariç)
+                adjustPatrolType(patrol);
+
+                // Eğer eklenen kişi rütbe olarak amirden daha yüksekse, amirliği otomatik devretmesin (kontrol amirinde kalır)
+                // Ancak isterseniz devredebilirsiniz. "her devriyenin amiri ayrı olsun ve sadece amir bunu devretsin" dediğiniz için amir değişmez.
+                
+                playSound('beep');
+                renderActiveUnits();
+                loadPatrolOfficerChecklist();
+            }
+            closeAddMemberModal();
+        }
+
+        // Sekme geçişi yapıldığında memur kontrol listesini tazeleyelim
+        const originalSwitchMdtTab = switchMdtTab;
+        switchMdtTab = function(tabId) {
+            originalSwitchMdtTab(tabId);
+            if (tabId === 'patrols') {
+                loadPatrolOfficerChecklist();
+                renderActiveUnits();
+            }
+        };
+    </script>
+</body>
+</html>
